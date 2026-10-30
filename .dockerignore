@@ -1,0 +1,10 @@
+.venv
+workspace
+analysis_workspace
+__pycache__
+.pytest_cache
+.git
+.idea
+.vscode
+*.log
+

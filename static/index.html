@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CI_Agent — Project Explanation & Autonomous AI Code Repair</title>
+  <meta name="description" content="Autonomous CI failure diagnosis, repair, and deep codebase explanation powered by local LLMs">
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'neutral' });</script>
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <a class="brand-badge" id="nav-brand" href="#dashboard">
+        <div class="brand-icon">CI</div>
+        <div>
+          <div class="brand-title">CI_Agent</div>
+          <div class="brand-subtitle">Autonomous Code Repair</div>
+        </div>
+      </a>
+
+      <div class="nav-actions">
+        <span class="badge-demo">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          Demo Auth Active
+        </span>
+
+        <div id="user-profile-widget" class="user-pill" style="display: none; align-items: center; gap: 8px;">
+          <span id="nav-username">Engineer</span>
+          <button id="btn-open-change-pw" class="btn btn-sm btn-outline" title="Change password" style="padding: 2px 8px; font-size: 0.75rem;">Password</button>
+          <button id="btn-signout" class="btn btn-sm btn-outline" title="Sign out" style="padding: 2px 8px; font-size: 0.75rem;">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notification Banner / Toaster -->
+  <div id="toast-container" style="position: fixed; top: 75px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px;"></div>
+
+  <!-- Main View Container -->
+  <main class="main-wrapper" id="app-root">
+
+    <!-- ===============================================================
+         VIEW 1: SIGN IN
+         =============================================================== -->
+    <section id="view-signin" class="auth-container">
+      <canvas id="auth-canvas-signin" class="auth-backdrop-canvas"></canvas>
+      <div class="auth-card-frame">
+        <div class="auth-card">
+          <!-- Unique Animated CI Orbital Reactor Emblem -->
+          <div class="auth-reactor-wrapper">
+            <div class="reactor-core">
+              <div class="reactor-ring-outer"></div>
+              <div class="reactor-ring-inner"></div>
+              <div class="reactor-orbit-dot dot-1"></div>
+              <div class="reactor-orbit-dot dot-2"></div>
+              <div class="reactor-orbit-dot dot-3"></div>
+              <div class="reactor-center-badge">CI</div>
+            </div>
+          </div>
+
+          <div class="auth-header">
+            <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Secure Engineering Portal</span>
+            <h2 style="margin-top: 4px;">Sign In to CI_Agent</h2>
+            <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-top: 6px;">Access autonomous code repair & project intelligence</p>
+          </div>
+
+          <div class="auth-notice-banner">
+            <strong>Demo Mode Active:</strong> Simulated session authentication is active. No external identity provider required.
+          </div>
+
+          <form id="form-signin" novalidate>
+            <div class="form-group anim-delay-1">
+              <label class="form-label" for="signin-email">Email or Username</label>
+              <div class="input-glow-wrapper">
+                <input type="text" id="signin-email" class="form-control" placeholder="engineer@ci-agent.local" value="lead.engineer@taskflow.dev" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signin-email" class="form-error" style="display: none;"></div>
+            </div>
+
+            <div class="form-group anim-delay-2">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label class="form-label" for="signin-password" style="margin-bottom: 0;">Password</label>
+                <a id="link-goto-forgot" class="auth-switch-link" style="font-size: 0.8rem;">Forgot password?</a>
+              </div>
+              <div class="input-glow-wrapper">
+                <div class="password-wrapper">
+                  <input type="password" id="signin-password" class="form-control" placeholder="••••••••" value="projectdemo2026" required>
+                  <button type="button" class="password-toggle-btn" id="toggle-signin-password" aria-label="Toggle password visibility">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                </div>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signin-password" class="form-error" style="display: none;"></div>
+            </div>
+
+            <button type="submit" id="btn-submit-signin" class="btn btn-primary btn-lg anim-delay-3" style="width: 100%; margin-top: 8px;">
+              <span>Sign In to Platform</span>
+            </button>
+          </form>
+
+          <div class="anim-delay-4" style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
+            Don't have an account? <a id="link-goto-signup" class="auth-switch-link">Create one here</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===============================================================
+         VIEW 2: SIGN UP
+         =============================================================== -->
+    <section id="view-signup" class="auth-container" style="display: none;">
+      <canvas id="auth-canvas-signup" class="auth-backdrop-canvas"></canvas>
+      <div class="auth-card-frame">
+        <div class="auth-card">
+          <!-- Unique Animated CI Orbital Reactor Emblem -->
+          <div class="auth-reactor-wrapper">
+            <div class="reactor-core">
+              <div class="reactor-ring-outer"></div>
+              <div class="reactor-ring-inner"></div>
+              <div class="reactor-orbit-dot dot-1"></div>
+              <div class="reactor-orbit-dot dot-2"></div>
+              <div class="reactor-orbit-dot dot-3"></div>
+              <div class="reactor-center-badge">CI</div>
+            </div>
+          </div>
+
+          <div class="auth-header">
+            <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Create Account</span>
+            <h2 style="margin-top: 4px;">Join CI_Agent</h2>
+            <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-top: 6px;">Register your workspace engineer profile</p>
+          </div>
+
+          <form id="form-signup" novalidate>
+            <div class="form-group anim-delay-1">
+              <label class="form-label" for="signup-name">Full Name</label>
+              <div class="input-glow-wrapper">
+                <input type="text" id="signup-name" class="form-control" placeholder="YOUR NAME" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signup-name" class="form-error" style="display: none;"></div>
+            </div>
+
+            <div class="form-group anim-delay-2">
+              <label class="form-label" for="signup-email">Email Address</label>
+              <div class="input-glow-wrapper">
+                <input type="email" id="signup-email" class="form-control" placeholder="engineer@example.com" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signup-email" class="form-error" style="display: none;"></div>
+            </div>
+
+            <div class="form-group anim-delay-3">
+              <label class="form-label" for="signup-password">Password</label>
+              <div class="input-glow-wrapper">
+                <input type="password" id="signup-password" class="form-control" placeholder="Minimum 6 characters" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signup-password" class="form-error" style="display: none;"></div>
+            </div>
+
+            <div class="form-group anim-delay-4">
+              <label class="form-label" for="signup-confirm-password">Confirm Password</label>
+              <div class="input-glow-wrapper">
+                <input type="password" id="signup-confirm-password" class="form-control" placeholder="Re-enter password" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-signup-confirm-password" class="form-error" style="display: none;"></div>
+            </div>
+
+            <button type="submit" id="btn-submit-signup" class="btn btn-primary btn-lg anim-delay-4" style="width: 100%; margin-top: 8px;">
+              <span>Create Account</span>
+            </button>
+          </form>
+
+          <div style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
+            Already have an account? <a id="link-goto-signin" class="auth-switch-link">Sign in here</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===============================================================
+         VIEW 2.5: FORGOT & RESET PASSWORD
+         =============================================================== -->
+    <section id="view-forgot" class="auth-container" style="display: none;">
+      <canvas id="auth-canvas-forgot" class="auth-backdrop-canvas"></canvas>
+      <div class="auth-card-frame">
+        <div class="auth-card">
+          <!-- Animated CI Orbital Reactor Emblem -->
+          <div class="auth-reactor-wrapper">
+            <div class="reactor-core">
+              <div class="reactor-ring-outer"></div>
+              <div class="reactor-ring-inner"></div>
+              <div class="reactor-orbit-dot dot-1"></div>
+              <div class="reactor-orbit-dot dot-2"></div>
+              <div class="reactor-orbit-dot dot-3"></div>
+              <div class="reactor-center-badge">CI</div>
+            </div>
+          </div>
+
+          <div class="auth-header">
+            <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Account Recovery</span>
+            <h2 style="margin-top: 4px;">Reset Password</h2>
+            <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-top: 6px;">Request a cryptographic reset token for your account</p>
+          </div>
+
+          <!-- Step 1: Request Token Form -->
+          <form id="form-forgot-request" novalidate>
+            <div class="form-group anim-delay-1">
+              <label class="form-label" for="forgot-email">Account Email Address</label>
+              <div class="input-glow-wrapper">
+                <input type="email" id="forgot-email" class="form-control" placeholder="engineer@example.com" value="lead.engineer@taskflow.dev" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-forgot-email" class="form-error" style="display: none;"></div>
+            </div>
+
+            <button type="submit" id="btn-submit-forgot-request" class="btn btn-primary btn-lg anim-delay-2" style="width: 100%; margin-top: 8px;">
+              <span>Generate Reset Token</span>
+            </button>
+          </form>
+
+          <!-- Step 2: Set New Password Form (revealed upon token generation) -->
+          <form id="form-forgot-reset" style="display: none; margin-top: 14px;" novalidate>
+            <div class="auth-notice-banner" id="forgot-token-banner" style="background: rgba(46, 92, 56, 0.08); border-color: var(--color-success); color: var(--color-success); margin-bottom: 16px;">
+              <strong>Token Generated:</strong> Verification token generated securely and auto-filled below.
+            </div>
+
+            <div class="form-group anim-delay-1">
+              <label class="form-label" for="reset-token-input">Security Reset Token</label>
+              <input type="text" id="reset-token-input" class="form-control" style="font-family: var(--font-mono); font-size: 0.82rem; background: #FFF;" readonly required>
+            </div>
+
+            <div class="form-group anim-delay-2">
+              <label class="form-label" for="reset-new-password">New Password</label>
+              <div class="input-glow-wrapper">
+                <input type="password" id="reset-new-password" class="form-control" placeholder="Minimum 6 characters" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-reset-password" class="form-error" style="display: none;"></div>
+            </div>
+
+            <div class="form-group anim-delay-3">
+              <label class="form-label" for="reset-confirm-password">Confirm New Password</label>
+              <div class="input-glow-wrapper">
+                <input type="password" id="reset-confirm-password" class="form-control" placeholder="Re-enter new password" required>
+                <div class="input-focus-wave"></div>
+              </div>
+              <div id="err-reset-confirm" class="form-error" style="display: none;"></div>
+            </div>
+
+            <button type="submit" id="btn-submit-forgot-reset" class="btn btn-primary btn-lg anim-delay-4" style="width: 100%; margin-top: 8px;">
+              <span>Save New Password to SQLite</span>
+            </button>
+          </form>
+
+          <div style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
+            Remembered your password? <a id="link-goto-signin-from-forgot" class="auth-switch-link">Back to Sign In</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===============================================================
+         VIEW 3: DASHBOARD (2 MAIN OPTIONS)
+         =============================================================== -->
+    <section id="view-dashboard" style="display: none;">
+      <div class="hero-editorial">
+        <span class="tagline">Autonomous Engineering Workspace</span>
+        <h1>Select Platform Capability</h1>
+        <p class="hero-sub">Deep codebase understanding and autonomous CI failure diagnosis powered by local LLMs and containerized verification.</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <!-- Feature Card 1: Project Explanation -->
+        <div class="feature-card">
+          <div>
+            <div class="feature-card-header">
+              <div class="feature-card-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+              </div>
+              <div>
+                <span class="highlight-pill">Codebase Intelligence</span>
+                <h2 class="feature-card-title">Understand Your Project</h2>
+              </div>
+            </div>
+
+            <p class="feature-card-desc">
+              Upload a GitHub repository URL or select a local project folder to understand the project architecture, files, technologies, and workflow.
+            </p>
+
+            <div class="feature-card-highlights">
+              <span class="highlight-pill">Architecture Diagram</span>
+              <span class="highlight-pill">Interactive File Explorer</span>
+              <span class="highlight-pill">Execution Lifecycle</span>
+              <span class="highlight-pill">Context-Aware AI Chat</span>
+            </div>
+          </div>
+
+          <button id="btn-dashboard-explore" class="btn btn-primary btn-lg" style="width: 100%;">
+            <span>Explore Project</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+
+        <!-- Feature Card 2: CI Agent Code Repair -->
+        <div class="feature-card">
+          <div>
+            <div class="feature-card-header">
+              <div class="feature-card-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/></svg>
+              </div>
+              <div>
+                <span class="highlight-pill">Autonomous Self-Healing</span>
+                <h2 class="feature-card-title">AI-Powered CI Repair</h2>
+              </div>
+            </div>
+
+            <p class="feature-card-desc">
+              Provide a GitHub repository URL to run tests, investigate failures, generate a candidate code fix, validate the changes, and optionally publish the verified repair to GitHub.
+            </p>
+
+            <div class="feature-card-highlights">
+              <span class="highlight-pill">Multi-Round LLM Loop</span>
+              <span class="highlight-pill">AST Regression Guard</span>
+              <span class="highlight-pill">Docker Verification</span>
+              <span class="highlight-pill">Live GitHub Actions Push</span>
+            </div>
+          </div>
+
+          <button id="btn-dashboard-repair" class="btn btn-primary btn-lg" style="width: 100%;">
+            <span>Open CI Agent</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===============================================================
+         VIEW 4: PROJECT EXPLANATION PAGE
+         =============================================================== -->
+    <section id="view-explanation" style="display: none;">
+      <div style="margin-bottom: 24px;">
+        <a id="btn-back-from-explanation" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          Back to Dashboard
+        </a>
+      </div>
+
+      <div class="card" style="margin-bottom: 32px;">
+        <span class="tagline" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Project Ingestion</span>
+        <h2>Select Codebase Source</h2>
+        <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-bottom: 20px;">Choose a remote Git repository or load a folder from your local system.</p>
+
+        <!-- Mode Selector Tabs -->
+        <div class="tabs-nav">
+          <button class="tab-btn active" id="tab-src-github">GitHub Repository</button>
+          <button class="tab-btn" id="tab-src-local">Local Project Folder</button>
+        </div>
+
+        <!-- Mode A: GitHub Repo Input -->
+        <div id="panel-src-github">
+          <div style="display: grid; grid-template-columns: 1fr 200px auto; gap: 14px; align-items: end;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="input-explain-repo">GitHub Repository URL</label>
+              <input type="text" id="input-explain-repo" class="form-control" placeholder="https://github.com/owner/repository" value="https://github.com/bhuvaneshwaran016/taskflow_ci_agent_test">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="input-explain-branch">Branch (optional)</label>
+              <input type="text" id="input-explain-branch" class="form-control" placeholder="main" value="main">
+            </div>
+
+            <button id="btn-start-explain" class="btn btn-primary" style="height: 48px;">
+              <span>Analyze Project</span>
+            </button>
+          </div>
+
+          <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 0.82rem; color: var(--color-burgundy); font-weight: 600;">Quick Presets:</span>
+            <span class="preset-chip" onclick="setExplainPreset('https://github.com/bhuvaneshwaran016/Taskflow-Hard-Level-')">Taskflow Hard Level</span>
+            <span class="preset-chip" onclick="setExplainPreset('https://github.com/bhuvaneshwaran016/taskflow_ci_agent_test')">TaskFlow Test Suite</span>
+            <span class="preset-chip" onclick="setExplainPreset('https://github.com/bhuvaneshwaran016/CI-CD-pipeline-learning-using-factorial-problem')">Factorial Problem</span>
+          </div>
+        </div>
+
+        <!-- Mode B: Local Project Folder -->
+        <div id="panel-src-local" style="display: none;">
+          <div style="background: var(--color-cream-light); border: 2px dashed rgba(89, 9, 7, 0.3); border-radius: var(--radius-lg); padding: 32px; text-align: center;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-burgundy)" stroke-width="2" style="margin-bottom: 12px;"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
+            <h3 style="margin-bottom: 8px;">Select Project Directory</h3>
+            <p style="color: var(--color-text-muted); font-size: 0.9rem; max-width: 580px; margin: 0 auto 16px;">
+              Use the browser directory picker to upload files while preserving folder structure.
+            </p>
+
+            <input type="file" id="local-folder-input" webkitdirectory directory multiple style="display: none;">
+            <button id="btn-browse-folder" class="btn btn-secondary">
+              <span>Choose Local Folder...</span>
+            </button>
+
+            <div id="local-files-preview" style="display: none; margin-top: 20px; text-align: left; background: #FFF; padding: 16px; border-radius: var(--radius-md); max-height: 200px; overflow-y: auto;">
+              <div style="font-weight: 700; color: var(--color-burgundy); margin-bottom: 8px;" id="local-folder-stats">Selected files:</div>
+              <ul id="local-files-list" style="list-style: none; font-family: var(--font-mono); font-size: 0.82rem;"></ul>
+            </div>
+
+            <button id="btn-analyze-local-files" class="btn btn-primary" style="display: none; margin-top: 16px;">
+              <span>Analyze Selected Local Files</span>
+            </button>
+          </div>
+
+          <p style="font-size: 0.8rem; color: var(--color-burgundy); margin-top: 12px; line-height: 1.4;">
+            * Security Note: Browser folder selection reads chosen files in-memory; it does not grant unrestricted or silent background access to your host operating system.
+          </p>
+        </div>
+      </div>
+
+      <!-- Analysis Results View -->
+      <div id="explanation-results-container" style="display: none;">
+
+        <div style="display: grid; grid-template-columns: 1fr 380px; gap: 28px; align-items: start;">
+          <!-- Left Column: 6 Deep Analysis Tabs -->
+          <div>
+            <div class="tabs-nav" id="analysis-tabs">
+              <button class="tab-btn active" data-tab="tab-overview">1. Overview</button>
+              <button class="tab-btn" data-tab="tab-architecture">2. Architecture</button>
+              <button class="tab-btn" data-tab="tab-files">3. File Explorer</button>
+              <button class="tab-btn" data-tab="tab-flow">4. Execution Flow</button>
+              <button class="tab-btn" data-tab="tab-deps">5. Dependencies</button>
+              <button class="tab-btn" data-tab="tab-tests">6. Tests & CI/CD</button>
+              <button class="tab-btn" data-tab="tab-issues">7. Issues & Suggestions</button>
+            </div>
+
+            <!-- Tab 1: Overview -->
+            <div id="content-tab-overview" class="card card-cream">
+              <h3 style="margin-bottom: 12px;">Executive Overview</h3>
+              <p id="explain-overview-text" style="font-size: 1.05rem; line-height: 1.6; margin-bottom: 24px;"></p>
+
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 24px;">
+                <div style="background: rgba(89, 9, 7, 0.08); padding: 14px; border-radius: var(--radius-md);">
+                  <div style="font-size: 0.76rem; text-transform: uppercase; color: var(--color-burgundy); font-weight: 700;">Total Files</div>
+                  <div id="stat-total-files" style="font-size: 1.8rem; font-weight: 800; color: var(--color-burgundy);">0</div>
+                </div>
+                <div style="background: rgba(89, 9, 7, 0.08); padding: 14px; border-radius: var(--radius-md);">
+                  <div style="font-size: 0.76rem; text-transform: uppercase; color: var(--color-burgundy); font-weight: 700;">Total Code Lines</div>
+                  <div id="stat-total-lines" style="font-size: 1.8rem; font-weight: 800; color: var(--color-burgundy);">0</div>
+                </div>
+                <div style="background: rgba(89, 9, 7, 0.08); padding: 14px; border-radius: var(--radius-md);">
+                  <div style="font-size: 0.76rem; text-transform: uppercase; color: var(--color-burgundy); font-weight: 700;">Primary Language</div>
+                  <div id="stat-primary-lang" style="font-size: 1.8rem; font-weight: 800; color: var(--color-burgundy);">-</div>
+                </div>
+              </div>
+
+              <h4>Language Distribution</h4>
+              <div id="explain-languages-bars" style="margin-top: 8px;"></div>
+            </div>
+
+            <!-- Tab 2: Architecture -->
+            <div id="content-tab-architecture" class="card card-cream" style="display: none;">
+              <h3 style="margin-bottom: 12px;">Architectural Breakdown</h3>
+              <div id="explain-architecture-text" style="line-height: 1.6; margin-bottom: 20px;"></div>
+
+              <h4>Architecture Diagram</h4>
+              <p style="color: var(--color-text-muted); font-size: 0.88rem; margin-bottom: 8px;">Visual component relationship graph generated from parsed imports and entry points:</p>
+              <div id="explain-architecture-diagram" style="background: #FFF; padding: 20px; border-radius: var(--radius-md); border: 1px solid rgba(89, 9, 7, 0.15); margin-bottom: 24px; min-height: 120px; overflow-x: auto; text-align: center;"></div>
+
+              <h4>Key Modules & Responsibilities</h4>
+              <ul id="explain-key-components-list" style="margin: 12px 0 24px 20px; line-height: 1.7;"></ul>
+
+              <h4>Recommended Architectural Improvements</h4>
+              <div id="explain-improvements-text" style="background: rgba(89, 9, 7, 0.06); padding: 14px; border-radius: var(--radius-md); font-size: 0.95rem;"></div>
+            </div>
+
+            <!-- Tab 3: File Explorer -->
+            <div id="content-tab-files" class="explorer-layout" style="display: none;">
+              <div class="file-tree-sidebar">
+                <div style="font-weight: 700; color: var(--color-burgundy); margin-bottom: 10px; font-size: 0.85rem; text-transform: uppercase;">Project Files</div>
+                <div id="explorer-files-tree"></div>
+              </div>
+              <div class="code-viewer-panel">
+                <div class="code-viewer-header">
+                  <span id="code-viewer-filename" style="font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--color-burgundy);">Select a file to inspect</span>
+                  <span id="code-viewer-filesize" style="font-size: 0.78rem; color: var(--color-text-muted);"></span>
+                </div>
+                <div id="code-viewer-meta" style="padding: 10px 16px; background: rgba(89, 9, 7, 0.05); font-size: 0.82rem; border-bottom: 1px solid rgba(89, 9, 7, 0.1); display: none;"></div>
+                <div id="code-viewer-content" class="code-block" style="flex: 1; max-height: 500px;">// Click any file on the left to view contents</div>
+              </div>
+            </div>
+
+            <!-- Tab 4: Execution Flow -->
+            <div id="content-tab-flow" class="card card-cream" style="display: none;">
+              <h3 style="margin-bottom: 12px;">Application Lifecycle & Execution Flow</h3>
+              <div id="explain-flow-text" style="white-space: pre-line; line-height: 1.7;"></div>
+
+              <h4 style="margin-top: 24px;">Discovered Entry Points</h4>
+              <ul id="explain-entrypoints-list" style="margin: 10px 0 0 20px; font-family: var(--font-mono); font-size: 0.9rem;"></ul>
+
+              <h4 style="margin-top: 24px;">Exposed Endpoints / Routes</h4>
+              <div id="explain-endpoints-list" style="margin-top: 8px;"></div>
+            </div>
+
+            <!-- Tab 5: Dependencies -->
+            <div id="content-tab-deps" class="card card-cream" style="display: none;">
+              <h3 style="margin-bottom: 12px;">Dependencies & Ecosystem</h3>
+              <p style="color: var(--color-text-muted); font-size: 0.92rem; margin-bottom: 16px;">Libraries and tools parsed from manifest files with imports analysis.</p>
+              <div id="explain-dependencies-table"></div>
+            </div>
+
+            <!-- Tab 6: Tests & CI/CD -->
+            <div id="content-tab-tests" class="card card-cream" style="display: none;">
+              <h3 style="margin-bottom: 12px;">Testing & CI/CD Workflow</h3>
+              <div id="explain-cicd-info"></div>
+            </div>
+
+            <!-- Tab 7: Issues & Actionable Suggestions -->
+            <div id="content-tab-issues" class="card card-cream" style="display: none;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <div>
+                  <h3 style="margin-bottom: 4px;">Code-Grounded Issues & Actionable Suggestions</h3>
+                  <p style="color: var(--color-text-muted); font-size: 0.92rem;">Prioritized recommendations grounded in AST code analysis and test coverage.</p>
+                </div>
+                <span id="issues-badge-count" class="highlight-pill" style="font-size: 0.8rem; background: var(--color-burgundy); color: #FFF;">0 Issues Detected</span>
+              </div>
+              <div id="explain-issues-list"></div>
+            </div>
+          </div>
+
+          <!-- Right Column: Interactive Chatbot -->
+          <div>
+            <div class="chat-container">
+              <div style="background: var(--color-sage-deep); color: var(--color-cream-light); padding: 14px 18px; border-bottom: 1px solid rgba(89, 9, 7, 0.2); display: flex; align-items: center; justify-content: space-between;">
+                <div style="font-weight: 700; font-family: var(--font-serif); font-size: 1.05rem;">Project Architect Chat</div>
+                <span class="badge-demo" style="background: var(--color-burgundy); border: none; font-size: 0.7rem;">qwen2.5:3b</span>
+              </div>
+
+              <div id="chat-messages-list" class="chat-messages">
+                <div class="chat-bubble chat-bubble-ai">
+                  Hello! I am your Antigravity Project Architect. Ask me anything about this codebase, its architecture, execution flow, or where to add a feature.
+                </div>
+              </div>
+
+              <!-- Quick prompt chips -->
+              <div style="padding: 6px 14px; background: var(--color-cream-dark); display: flex; gap: 6px; overflow-x: auto;">
+                <span class="preset-chip" onclick="sendQuickPrompt('Explain this project in simple terms.')">Simple explanation</span>
+                <span class="preset-chip" onclick="sendQuickPrompt('What is the main execution flow?')">Execution flow</span>
+                <span class="preset-chip" onclick="sendQuickPrompt('Where should I add a new feature?')">Add a feature</span>
+              </div>
+
+              <div class="chat-input-row">
+                <textarea id="chat-input-text" class="chat-textarea" placeholder="Ask about this codebase... (Enter to send, Shift+Enter for newline)"></textarea>
+                <button id="btn-chat-send" class="btn btn-primary btn-sm" style="padding: 0 16px;">Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===============================================================
+         VIEW 5: CI AGENT — AI CODE REPAIR PAGE
+         =============================================================== -->
+    <section id="view-repair" style="display: none;">
+      <div style="margin-bottom: 24px;">
+        <a id="btn-back-from-repair" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+          Back to Dashboard
+        </a>
+      </div>
+
+      <!-- Stepper Nav -->
+      <div class="stepper-nav">
+        <div class="step-node active" id="step-node-1">
+          <div class="step-circle">1</div>
+          <div class="step-label">Repo Input</div>
+        </div>
+        <div class="step-node" id="step-node-2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Baseline Tests</div>
+        </div>
+        <div class="step-node" id="step-node-3">
+          <div class="step-circle">3</div>
+          <div class="step-label">AI Investigation</div>
+        </div>
+        <div class="step-node" id="step-node-4">
+          <div class="step-circle">4</div>
+          <div class="step-label">Patch Review</div>
+        </div>
+        <div class="step-node" id="step-node-5">
+          <div class="step-circle">5</div>
+          <div class="step-label">GitHub Approval</div>
+        </div>
+      </div>
+
+      <!-- Step 1: Repo Input Card -->
+      <div class="card card-cream" id="panel-step-1" style="margin-bottom: 28px;">
+        <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Step 1</span>
+        <h2>Select Repository for Autonomous Repair</h2>
+        <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-bottom: 20px;">
+          Provide any GitHub repository URL. The agent will clone it into an isolated workspace, execute tests, diagnose root causes, and patch defects.
+        </p>
+
+        <div style="display: grid; grid-template-columns: 1fr 180px auto; gap: 14px; align-items: end;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="input-repair-repo">GitHub Repository URL</label>
+            <input type="text" id="input-repair-repo" class="form-control" placeholder="https://github.com/owner/repository" value="https://github.com/bhuvaneshwaran016/Taskflow-Hard-Level-">
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label" for="input-repair-branch">Target Branch</label>
+            <input type="text" id="input-repair-branch" class="form-control" value="main">
+          </div>
+
+          <button id="btn-start-repair-job" class="btn btn-primary" style="height: 48px;">
+            <span>Start Autonomous Repair</span>
+          </button>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: 0.82rem; color: var(--color-burgundy); font-weight: 600;">Demonstration Targets:</span>
+          <span class="preset-chip" onclick="setRepairPreset('https://github.com/bhuvaneshwaran016/Taskflow-Hard-Level-')">Taskflow Hard Level (Concurrency Bug)</span>
+          <span class="preset-chip" onclick="setRepairPreset('https://github.com/bhuvaneshwaran016/CI-CD-pipeline-learning-using-factorial-problem')">Factorial Problem (Flawed Tests)</span>
+          <span class="preset-chip" onclick="setRepairPreset('https://github.com/bhuvaneshwaran016/taskflow_ci_agent_test')">TaskFlow CI (Original)</span>
+        </div>
+      </div>
+
+      <!-- Pipeline Execution Monitor (Steps 2 - 5) -->
+      <div id="repair-pipeline-display" style="display: none;">
+
+        <!-- Live Progress Status Banner -->
+        <div id="repair-live-status-banner" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: rgba(89, 9, 7, 0.08); border-left: 4px solid var(--color-burgundy); border-radius: var(--radius-md); margin-bottom: 24px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="spinner" id="repair-live-spinner" style="width: 18px; height: 18px; border-top-color: var(--color-burgundy);"></span>
+            <div>
+              <div id="repair-live-step-title" style="font-weight: 700; color: var(--color-burgundy); font-size: 0.95rem;">Executing Pipeline...</div>
+              <div id="repair-live-log-msg" style="font-size: 0.82rem; color: var(--color-text-muted); font-family: var(--font-mono); margin-top: 2px;">Initializing isolated workspace sandbox...</div>
+            </div>
+          </div>
+          <span id="repair-live-badge" class="badge-demo" style="background: var(--color-burgundy); color: #FFF; border: none; font-size: 0.75rem;">RUNNING</span>
+        </div>
+
+        <!-- Step 2: Baseline Tests -->
+        <div class="card card-cream" id="panel-step-2" style="margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+              <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Step 2</span>
+              <h3>Baseline Test Results (Reproduced Failure)</h3>
+            </div>
+            <div id="baseline-status-badge"></div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 16px;">
+            <div style="background: rgba(89, 9, 7, 0.08); padding: 10px; border-radius: var(--radius-sm);">
+              <div style="font-size: 0.75rem; color: var(--color-burgundy); font-weight: 700;">Status</div>
+              <div id="baseline-summary" style="font-weight: 700;">Executing...</div>
+            </div>
+            <div style="background: rgba(128, 24, 21, 0.1); padding: 10px; border-radius: var(--radius-sm);">
+              <div style="font-size: 0.75rem; color: var(--color-danger); font-weight: 700;">Failing Tests</div>
+              <div id="baseline-failed-count" style="font-weight: 700; color: var(--color-danger);">-</div>
+            </div>
+            <div style="background: rgba(46, 92, 56, 0.1); padding: 10px; border-radius: var(--radius-sm);">
+              <div style="font-size: 0.75rem; color: var(--color-success); font-weight: 700;">Passing Tests</div>
+              <div id="baseline-passed-count" style="font-weight: 700; color: var(--color-success);">-</div>
+            </div>
+          </div>
+
+          <details style="background: var(--color-cream-light); padding: 10px 14px; border-radius: var(--radius-md); font-size: 0.86rem; border: 1px solid rgba(89, 9, 7, 0.15);">
+            <summary style="cursor: pointer; font-weight: 600; color: var(--color-burgundy);">Expand Baseline Pytest Log Output</summary>
+            <pre id="baseline-raw-log" style="margin-top: 10px; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; background: var(--color-surface-code); color: #FFF; padding: 12px; border-radius: var(--radius-sm); max-height: 240px; overflow-y: auto;"></pre>
+          </details>
+        </div>
+
+        <!-- Step 3: AI Investigation -->
+        <div class="card card-cream" id="panel-step-3" style="margin-bottom: 24px;">
+          <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Step 3</span>
+          <h3>AI Investigation & Fault Localization</h3>
+          <p style="color: var(--color-text-muted); font-size: 0.92rem; margin-bottom: 16px;">
+            Local LLM analyzed pytest stack traces and isolated culprit source code modules using AST parser.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: #FFF; padding: 14px; border-radius: var(--radius-md); border: 1px solid rgba(89, 9, 7, 0.15);">
+              <div style="font-size: 0.8rem; font-weight: 700; color: var(--color-burgundy); margin-bottom: 6px;">Culprit Source Files</div>
+              <ul id="diagnosis-target-files" style="font-family: var(--font-mono); font-size: 0.86rem; list-style: none;"></ul>
+            </div>
+
+            <div style="background: #FFF; padding: 14px; border-radius: var(--radius-md); border: 1px solid rgba(89, 9, 7, 0.15);">
+              <div style="font-size: 0.8rem; font-weight: 700; color: var(--color-burgundy); margin-bottom: 6px;">Failing Test Functions</div>
+              <ul id="diagnosis-failing-tests" style="font-family: var(--font-mono); font-size: 0.86rem; list-style: none;"></ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Patch Review -->
+        <div class="card card-cream" id="panel-step-4" style="margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div>
+              <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Step 4</span>
+              <h3>Patch Review & Verification Results</h3>
+            </div>
+            <button id="btn-retry-repair" class="btn btn-secondary btn-sm">Retry Repair</button>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <div style="font-weight: 700; color: var(--color-burgundy); font-size: 0.9rem; margin-bottom: 6px;">Post-Repair Pytest Suite Verification:</div>
+            <div id="post-repair-badge" style="font-size: 1.05rem; font-weight: 700; margin-bottom: 8px;"></div>
+          </div>
+
+          <div style="margin-bottom: 14px;">
+            <div style="font-weight: 700; color: var(--color-burgundy); font-size: 0.9rem; margin-bottom: 6px;">Unified Code Diff:</div>
+            <div id="diff-viewer" class="diff-container" style="max-height: 380px;">No diff available yet</div>
+          </div>
+        </div>
+
+        <!-- Step 5: Publication Approval -->
+        <div class="card" id="panel-step-5" style="background: var(--color-cream-light); border: 2px solid var(--color-burgundy);">
+          <span class="tagline" style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-burgundy); font-weight: 700;">Step 5</span>
+          <h2>Human Approval Before GitHub Publication</h2>
+          <p style="color: var(--color-text-muted); font-size: 0.95rem; margin-bottom: 20px;">
+            All tests are verified and passing with 0 regressions. Review proposed commit details before triggering remote push.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 200px 1fr auto; gap: 14px; align-items: end;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="input-approve-branch">Push Branch</label>
+              <input type="text" id="input-approve-branch" class="form-control" value="main">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label" for="input-approve-msg">Commit Message</label>
+              <input type="text" id="input-approve-msg" class="form-control" value="[CI_Agent] Automated AI Repair: Resolved all defects, 100% tests passing">
+            </div>
+
+            <button id="btn-approve-push" class="btn btn-primary" style="height: 48px;">
+              <span>Approve & Push to GitHub</span>
+            </button>
+          </div>
+
+          <div id="push-result-banner" style="display: none; margin-top: 18px; padding: 14px; border-radius: var(--radius-md); background: rgba(46, 92, 56, 0.15); border: 1px solid var(--color-success);">
+            <div style="font-weight: 700; color: var(--color-success); font-size: 1.05rem;" id="push-result-title">Pushed Successfully</div>
+            <div style="font-size: 0.9rem; margin-top: 4px;" id="push-result-details"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Modal: Change Password for Authenticated User -->
+    <div id="modal-change-password" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+      <div class="card" style="width: 100%; max-width: 440px; margin: 20px; background: var(--color-cream); border: 2px solid var(--color-burgundy); border-radius: var(--radius-xl); padding: 32px; box-shadow: 0 25px 50px -12px rgba(89, 9, 7, 0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <h3 style="margin: 0; color: var(--color-burgundy);">Change Account Password</h3>
+          <button id="btn-close-change-pw-modal" class="btn btn-sm btn-outline" style="border-radius: 50%; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center;">✕</button>
+        </div>
+        <p style="color: var(--color-text-muted); font-size: 0.88rem; margin-bottom: 18px;">
+          Update your password stored securely in SQLite with salted PBKDF2 hashing.
+        </p>
+        <form id="form-change-password" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="cp-old-password">Current Password</label>
+            <input type="password" id="cp-old-password" class="form-control" placeholder="••••••••" required>
+            <div id="err-cp-old" class="form-error" style="display: none;"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="cp-new-password">New Password</label>
+            <input type="password" id="cp-new-password" class="form-control" placeholder="Minimum 6 characters" required>
+            <div id="err-cp-new" class="form-error" style="display: none;"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="cp-confirm-password">Confirm New Password</label>
+            <input type="password" id="cp-confirm-password" class="form-control" placeholder="Re-enter new password" required>
+            <div id="err-cp-confirm" class="form-error" style="display: none;"></div>
+          </div>
+          <button type="submit" id="btn-submit-change-pw" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+            <span>Save New Password to SQLite</span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Load Frontend Logic -->
+  <script src="/static/app.js"></script>
+</body>
+</html>
