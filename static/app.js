@@ -192,6 +192,7 @@
       } else {
         switchView("dashboard");
       }
+      if (introElements.overlay) introElements.overlay.style.display = "none";
     } else {
       if (hash === "signup") {
         switchView("signup");
@@ -200,8 +201,354 @@
       } else {
         switchView("signin");
       }
+      playCinematicIntro();
     }
   }
+
+  // ==========================================================================
+  // Cinematic Kinetic Intro Orchestrator:
+  // "C" from left, "I" from right, collision at center, "AGENT" pulls up from bottom,
+  // laser slice sweep, and seamless dissolve to Sign In / Sign Up
+  // ==========================================================================
+  const introState = {
+    timerBurst: null,
+    timerFade: null,
+    timerHide: null,
+    animFrameId: null,
+    isPlaying: false,
+    audioContext: null,
+  };
+
+  const introElements = {
+    overlay: document.getElementById("cinematic-intro"),
+    stage: document.getElementById("intro-stage"),
+    starCanvas: document.getElementById("intro-star-canvas"),
+    btnSkip: document.getElementById("btn-skip-intro"),
+    btnReplaySignIn: document.getElementById("btn-replay-intro-signin"),
+    btnReplaySignUp: document.getElementById("btn-replay-intro-signup"),
+    btnReplayForgot: document.getElementById("btn-replay-intro-forgot"),
+  };
+
+  function playCinematicAudio() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      if (!introState.audioContext) {
+        introState.audioContext = new AudioCtx();
+      }
+      const ctx = introState.audioContext;
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+      const now = ctx.currentTime;
+
+      // 1. Inward rush whoosh (0s to 0.85s)
+      const whooshOsc = ctx.createOscillator();
+      const whooshGain = ctx.createGain();
+      const whooshFilter = ctx.createBiquadFilter();
+      whooshOsc.type = "sine";
+      whooshFilter.type = "bandpass";
+      whooshFilter.frequency.setValueAtTime(180, now);
+      whooshFilter.frequency.exponentialRampToValueAtTime(1200, now + 0.82);
+      whooshGain.gain.setValueAtTime(0.01, now);
+      whooshGain.gain.linearRampToValueAtTime(0.12, now + 0.78);
+      whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.86);
+      whooshOsc.connect(whooshFilter);
+      whooshFilter.connect(whooshGain);
+      whooshGain.connect(ctx.destination);
+      whooshOsc.start(now);
+      whooshOsc.stop(now + 0.88);
+
+      // 2. Heavy Collision Impact Boom (at 0.85s)
+      const boomOsc = ctx.createOscillator();
+      const boomGain = ctx.createGain();
+      boomOsc.type = "sine";
+      boomOsc.frequency.setValueAtTime(150, now + 0.85);
+      boomOsc.frequency.exponentialRampToValueAtTime(30, now + 1.4);
+      boomGain.gain.setValueAtTime(0.3, now + 0.85);
+      boomGain.gain.exponentialRampToValueAtTime(0.001, now + 1.45);
+      boomOsc.connect(boomGain);
+      boomGain.connect(ctx.destination);
+      boomOsc.start(now + 0.85);
+      boomOsc.stop(now + 1.5);
+
+      // 3. High-Frequency Metallic Impact Chime (at 0.85s)
+      const chimeOsc = ctx.createOscillator();
+      const chimeGain = ctx.createGain();
+      chimeOsc.type = "triangle";
+      chimeOsc.frequency.setValueAtTime(880, now + 0.85);
+      chimeOsc.frequency.exponentialRampToValueAtTime(380, now + 1.2);
+      chimeGain.gain.setValueAtTime(0.08, now + 0.85);
+      chimeGain.gain.exponentialRampToValueAtTime(0.001, now + 1.25);
+      chimeOsc.connect(chimeGain);
+      chimeGain.connect(ctx.destination);
+      chimeOsc.start(now + 0.85);
+      chimeOsc.stop(now + 1.3);
+
+      // 4. AGENT Magnetic Lock Docking Click (at 1.65s)
+      const dockOsc = ctx.createOscillator();
+      const dockGain = ctx.createGain();
+      dockOsc.type = "triangle";
+      dockOsc.frequency.setValueAtTime(330, now + 1.65);
+      dockOsc.frequency.exponentialRampToValueAtTime(660, now + 1.74);
+      dockGain.gain.setValueAtTime(0.07, now + 1.65);
+      dockGain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+      dockOsc.connect(dockGain);
+      dockGain.connect(ctx.destination);
+      dockOsc.start(now + 1.65);
+      dockOsc.stop(now + 1.82);
+
+      // 5. Laser Slice Beam Sweep (at 2.1s)
+      const laserOsc = ctx.createOscillator();
+      const laserGain = ctx.createGain();
+      laserOsc.type = "sawtooth";
+      laserOsc.frequency.setValueAtTime(1760, now + 2.1);
+      laserOsc.frequency.exponentialRampToValueAtTime(440, now + 2.45);
+      laserGain.gain.setValueAtTime(0.04, now + 2.1);
+      laserGain.gain.exponentialRampToValueAtTime(0.001, now + 2.48);
+      laserOsc.connect(laserGain);
+      laserGain.connect(ctx.destination);
+      laserOsc.start(now + 2.1);
+      laserOsc.stop(now + 2.5);
+    } catch (e) {
+      // AudioContext autoplay protection graceful fallback
+    }
+  }
+
+  function startIntroCanvas() {
+    const canvas = introElements.starCanvas;
+    if (!canvas) return { stop: () => {}, burst: () => {}, setPulling: () => {} };
+
+    const ctx = canvas.getContext("2d");
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    const onResize = () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    };
+    window.addEventListener("resize", onResize);
+
+    // Cosmic dust stars
+    const stars = [];
+    const starCount = 75;
+    for (let i = 0; i < starCount; i++) {
+      stars.push({
+        x: Math.random() * width,
+        y: Math.random() * height,
+        vx: (Math.random() - 0.5) * 0.35,
+        vy: (Math.random() - 0.5) * 0.35,
+        size: Math.random() * 2 + 0.8,
+        alpha: Math.random() * 0.7 + 0.2,
+        pulseSpeed: 0.02 + Math.random() * 0.03,
+      });
+    }
+
+    // Sparks from collision
+    const sparks = [];
+    // Magnetic upward stream
+    const magneticStreams = [];
+    let isPullingAgent = false;
+
+    function burst(cx, cy) {
+      const colors = ["#FFFFFF", "#FAF2E8", "#E8D2B5", "#D4BD9E", "#8C1613", "#590907"];
+      for (let i = 0; i < 65; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 12 + 2;
+        sparks.push({
+          x: cx,
+          y: cy,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          size: Math.random() * 3.5 + 1.5,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          alpha: 1,
+          decay: Math.random() * 0.025 + 0.015,
+        });
+      }
+    }
+
+    let isRunning = true;
+    function render() {
+      if (!isRunning) return;
+      ctx.clearRect(0, 0, width, height);
+
+      // Render cosmic background stars
+      for (let s of stars) {
+        s.x += s.vx;
+        s.y += s.vy;
+        if (s.x < 0) s.x = width;
+        if (s.x > width) s.x = 0;
+        if (s.y < 0) s.y = height;
+        if (s.y > height) s.y = 0;
+
+        s.alpha += Math.sin(Date.now() * 0.003 * s.pulseSpeed) * 0.01;
+        ctx.fillStyle = `rgba(232, 210, 181, ${Math.max(0.1, Math.min(0.9, s.alpha))})`;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Render & spawn magnetic streams when AGENT is pulling up
+      if (isPullingAgent) {
+        for (let k = 0; k < 2; k++) {
+          magneticStreams.push({
+            x: width / 2 + (Math.random() - 0.5) * 180,
+            y: height * 0.85 + Math.random() * 50,
+            vy: -(Math.random() * 6 + 4),
+            size: Math.random() * 2.5 + 1,
+            alpha: 0.9,
+            color: Math.random() > 0.4 ? "rgba(232, 210, 181," : "rgba(140, 22, 19,",
+          });
+        }
+      }
+
+      for (let i = magneticStreams.length - 1; i >= 0; i--) {
+        const ms = magneticStreams[i];
+        ms.y += ms.vy;
+        ms.alpha -= 0.025;
+        if (ms.alpha <= 0 || ms.y < height * 0.45) {
+          magneticStreams.splice(i, 1);
+          continue;
+        }
+        ctx.fillStyle = `${ms.color} ${ms.alpha})`;
+        ctx.beginPath();
+        ctx.arc(ms.x, ms.y, ms.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Render collision sparks
+      for (let i = sparks.length - 1; i >= 0; i--) {
+        const sp = sparks[i];
+        sp.x += sp.vx;
+        sp.y += sp.vy;
+        sp.vx *= 0.96;
+        sp.vy *= 0.96;
+        sp.alpha -= sp.decay;
+        if (sp.alpha <= 0) {
+          sparks.splice(i, 1);
+          continue;
+        }
+        ctx.save();
+        ctx.globalAlpha = sp.alpha;
+        ctx.fillStyle = sp.color;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = sp.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, sp.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      introState.animFrameId = requestAnimationFrame(render);
+    }
+
+    render();
+
+    return {
+      stop: () => {
+        isRunning = false;
+        window.removeEventListener("resize", onResize);
+        if (introState.animFrameId) {
+          cancelAnimationFrame(introState.animFrameId);
+          introState.animFrameId = null;
+        }
+      },
+      burst,
+      setPulling: (val) => { isPullingAgent = val; },
+    };
+  }
+
+  let canvasControls = null;
+
+  function playCinematicIntro(force = false) {
+    const overlay = introElements.overlay;
+    if (!overlay) return;
+
+    // If user is logged in and not forced replay, hide immediately
+    if (state.token && !force) {
+      overlay.style.display = "none";
+      return;
+    }
+
+    // Clear previous timers
+    clearTimeout(introState.timerBurst);
+    clearTimeout(introState.timerFade);
+    clearTimeout(introState.timerHide);
+    if (canvasControls) {
+      canvasControls.stop();
+      canvasControls = null;
+    }
+
+    introState.isPlaying = true;
+    overlay.style.display = "flex";
+    overlay.classList.remove("fade-out");
+    overlay.classList.remove("animate");
+
+    // Force browser reflow to restart CSS animations cleanly
+    void overlay.offsetWidth;
+
+    // Start audio & canvas
+    playCinematicAudio();
+    canvasControls = startIntroCanvas();
+
+    // Trigger keyframe animation
+    overlay.classList.add("animate");
+
+    // Collision spark burst at t = 850ms
+    introState.timerBurst = setTimeout(() => {
+      if (canvasControls && introState.isPlaying) {
+        const rect = overlay.getBoundingClientRect();
+        canvasControls.burst(rect.width / 2, rect.height / 2 - 25);
+        canvasControls.setPulling(true);
+      }
+    }, 850);
+
+    // Stop magnetic stream at t = 1800ms
+    setTimeout(() => {
+      if (canvasControls) canvasControls.setPulling(false);
+    }, 1800);
+
+    // Begin fade-out at t = 3200ms
+    introState.timerFade = setTimeout(() => {
+      skipIntro();
+    }, 3200);
+  }
+
+  function skipIntro() {
+    clearTimeout(introState.timerBurst);
+    clearTimeout(introState.timerFade);
+    clearTimeout(introState.timerHide);
+
+    const overlay = introElements.overlay;
+    if (!overlay) return;
+
+    introState.isPlaying = false;
+    overlay.classList.add("fade-out");
+    sessionStorage.setItem("ci_intro_seen", "1");
+
+    // Re-trigger entrance animation on the active auth card so it pops into view
+    const activeAuthCard = document.querySelector(".auth-container:not([style*='display: none']) .auth-card");
+    if (activeAuthCard) {
+      activeAuthCard.style.animation = "none";
+      void activeAuthCard.offsetWidth;
+      activeAuthCard.style.animation = "authCardIn 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards";
+    }
+
+    introState.timerHide = setTimeout(() => {
+      overlay.style.display = "none";
+      if (canvasControls) {
+        canvasControls.stop();
+        canvasControls = null;
+      }
+    }, 750);
+  }
+
+  // Hook up buttons
+  introElements.btnSkip?.addEventListener("click", skipIntro);
+  introElements.btnReplaySignIn?.addEventListener("click", () => playCinematicIntro(true));
+  introElements.btnReplaySignUp?.addEventListener("click", () => playCinematicIntro(true));
+  introElements.btnReplayForgot?.addEventListener("click", () => playCinematicIntro(true));
 
   // ==========================================
   // Authentication Handlers

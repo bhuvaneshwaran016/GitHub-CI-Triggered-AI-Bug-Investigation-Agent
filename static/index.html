@@ -14,6 +14,40 @@
 </head>
 <body>
 
+  <!-- ===============================================================
+       CINEMATIC INTRO: "C" from left, "I" from right, "AGENT" pulls from bottom
+       =============================================================== -->
+  <div id="cinematic-intro" class="cinematic-overlay">
+    <div class="intro-bg-canvas-wrapper">
+      <canvas id="intro-star-canvas"></canvas>
+    </div>
+    <div class="intro-shockwave" id="intro-shockwave"></div>
+    <div class="intro-flash" id="intro-flash"></div>
+    <div class="intro-stage" id="intro-stage">
+      <div class="intro-logo-group">
+        <div class="letter-c-box" id="intro-letter-c">
+          <span class="intro-glyph">C</span>
+          <div class="letter-trail trail-c"></div>
+        </div>
+        <div class="letter-i-box" id="intro-letter-i">
+          <span class="intro-glyph">I</span>
+          <div class="letter-trail trail-i"></div>
+        </div>
+      </div>
+      <div class="intro-magnetic-field" id="intro-magnetic-field"></div>
+      <div class="intro-agent-box" id="intro-agent">
+        <div class="agent-bracket bracket-left">[</div>
+        <span class="intro-agent-text">AGENT</span>
+        <div class="agent-bracket bracket-right">]</div>
+      </div>
+      <div class="intro-tagline" id="intro-tagline">
+        <span>AUTONOMOUS FAILURE REPAIR &amp; CODE INTELLIGENCE</span>
+      </div>
+      <div class="intro-beam-slice" id="intro-beam"></div>
+    </div>
+    <button id="btn-skip-intro" class="btn-skip-intro" type="button">Skip Intro ➔</button>
+  </div>
+
   <!-- App Header -->
   <header class="app-header">
     <div class="header-container">
@@ -110,6 +144,13 @@
           <div class="anim-delay-4" style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
             Don't have an account? <a id="link-goto-signup" class="auth-switch-link">Create one here</a>
           </div>
+
+          <div style="text-align: center; margin-top: 14px;">
+            <button type="button" class="btn-replay-intro-link" id="btn-replay-intro-signin">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>Replay Cinematic Logo Intro</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -183,6 +224,13 @@
 
           <div style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
             Already have an account? <a id="link-goto-signin" class="auth-switch-link">Sign in here</a>
+          </div>
+
+          <div style="text-align: center; margin-top: 14px;">
+            <button type="button" class="btn-replay-intro-link" id="btn-replay-intro-signup">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>Replay Cinematic Logo Intro</span>
+            </button>
           </div>
         </div>
       </div>
@@ -265,6 +313,13 @@
 
           <div style="text-align: center; margin-top: 24px; font-size: 0.9rem;">
             Remembered your password? <a id="link-goto-signin-from-forgot" class="auth-switch-link">Back to Sign In</a>
+          </div>
+
+          <div style="text-align: center; margin-top: 14px;">
+            <button type="button" class="btn-replay-intro-link" id="btn-replay-intro-forgot">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span>Replay Cinematic Logo Intro</span>
+            </button>
           </div>
         </div>
       </div>
