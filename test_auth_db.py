@@ -221,3 +221,163 @@ def test_api_chat_endpoints_and_workspace_clean(monkeypatch):
     assert r_clean.status_code == 200
     assert r_clean.json()["status"] == "success"
 
+
+def test_user_llm_config_db_storage_and_masking():
+    """Verifies SQLite storage for LLM settings and ensures API keys are safely masked."""
+    user_id = f"usr_test_{int(time.time()*1000)}"
+
+    # 1. Default config before saving
+    default_cfg = auth_db.get_user_llm_config(user_id)
+    assert default_cfg["provider"] == "local"
+    assert default_cfg["active_model"] == "qwen2.5:3b"
+    assert default_cfg["api_key"] == ""
+    assert default_cfg["usage_count"] == 0
+
+    # 2. Save server model with secret API key
+    secret_key = "gsk_prodsecret9876543210abcdef"
+    saved = auth_db.save_user_llm_config(
+        user_id=user_id,
+        provider="server",
+        active_model="llama-3.3-70b-versatile",
+        api_key=secret_key,
+        api_endpoint="https://api.groq.com/openai/v1",
+        usage_limit=10
+    )
+    assert saved["provider"] == "server"
+    assert saved["active_model"] == "llama-3.3-70b-versatile"
+    assert saved["has_api_key"] is True
+    assert "gsk_" in saved["api_key"]
+    assert "••••" in saved["api_key"], "Masked API key must contain bullet characters"
+    assert secret_key not in saved["api_key"], "Plaintext key must never be in client response"
+
+    # 3. Backend internal retrieval with raw_key=True
+    raw_cfg = auth_db.get_user_llm_config(user_id, raw_key=True)
+    assert raw_cfg["api_key"] == secret_key
+
+    # 4. Updating config with masked string should not overwrite original key
+    updated = auth_db.save_user_llm_config(
+        user_id=user_id,
+        provider="server",
+        active_model="mixtral-8x7b-32768",
+        api_key=saved["api_key"],  # passing back masked string
+        usage_limit=25
+    )
+    assert updated["active_model"] == "mixtral-8x7b-32768"
+    assert updated["usage_limit"] == 25
+    raw_after = auth_db.get_user_llm_config(user_id, raw_key=True)
+    assert raw_after["api_key"] == secret_key, "Original secret key must be preserved"
+
+
+def test_llm_usage_tracking_and_limit_enforcement():
+    """Verifies request counting, limit detection, and quota resets."""
+    user_id = f"usr_quota_{int(time.time()*1000)}"
+    auth_db.save_user_llm_config(
+        user_id=user_id,
+        provider="server",
+        active_model="llama-3.3-70b-versatile",
+        api_key="gsk_dummykey12345678",
+        usage_limit=2
+    )
+
+    assert auth_db.is_user_llm_limit_reached(user_id) is False
+
+    # Increment 1
+    info1 = auth_db.increment_user_llm_usage(user_id)
+    assert info1["usage_count"] == 1
+    assert info1["limit_reached"] is False
+    assert auth_db.is_user_llm_limit_reached(user_id) is False
+
+    # Increment 2 -> Limit reached!
+    info2 = auth_db.increment_user_llm_usage(user_id)
+    assert info2["usage_count"] == 2
+    assert info2["limit_reached"] is True
+    assert auth_db.is_user_llm_limit_reached(user_id) is True
+
+    # Reset quota
+    reset_cfg = auth_db.reset_user_llm_usage(user_id)
+    assert reset_cfg["usage_count"] == 0
+    assert reset_cfg["limit_reached"] is False
+    assert auth_db.is_user_llm_limit_reached(user_id) is False
+
+
+def test_api_llm_endpoints_and_quota_blocking(monkeypatch):
+    """Verifies REST endpoints /api/llm/config, /api/llm/reset-usage, and quota blocking in chat."""
+    email = f"llm_user_{int(time.time()*1000)}@dev.local"
+    r_signup = client.post("/api/auth/signup", json={
+        "name": "LLM Manager",
+        "email": email,
+        "password": "StrongPassword123!",
+        "confirmPassword": "StrongPassword123!"
+    })
+    token = r_signup.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. GET /api/llm/config
+    r_cfg = client.get("/api/llm/config", headers=headers)
+    assert r_cfg.status_code == 200
+    data = r_cfg.json()
+    assert "config" in data
+    assert "server_models" in data
+    assert len(data["server_models"]) > 0
+
+    # 2. POST /api/llm/config with limit of 1
+    r_save = client.post("/api/llm/config", headers=headers, json={
+        "provider": "server",
+        "active_model": "llama-3.3-70b-versatile",
+        "api_key": "gsk_testapikey1234567890abcdef",
+        "api_endpoint": "https://api.groq.com/openai/v1",
+        "usage_limit": 1
+    })
+    assert r_save.status_code == 200
+    saved_cfg = r_save.json()["config"]
+    assert saved_cfg["provider"] == "server"
+    assert saved_cfg["usage_limit"] == 1
+    assert saved_cfg["usage_count"] == 0
+
+    # 3. First chat query -> mock urllib request to return success
+    class MockResponse:
+        def __init__(self, data_dict):
+            self.data_dict = data_dict
+        def read(self):
+            import json
+            return json.dumps(self.data_dict).encode("utf-8")
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    def mock_urlopen(req, timeout=60):
+        return MockResponse({
+            "choices": [{"message": {"content": "Server model response: Code structure verified."}}]
+        })
+
+    monkeypatch.setattr(server.urllib.request, "urlopen", mock_urlopen)
+
+    # First request consumes the 1 quota
+    r_chat1 = client.post("/api/project/chat", headers=headers, json={
+        "message": "Explain architecture",
+        "project_id": "proj-llm-test"
+    })
+    assert r_chat1.status_code == 200
+    chat1_json = r_chat1.json()
+    assert "Server model response" in chat1_json["reply"]
+    assert chat1_json.get("llm_meta", {}).get("usage_count") == 1
+
+    # Second request hits quota limit -> MUST be blocked without calling urlopen!
+    monkeypatch.setattr(server.urllib.request, "urlopen", None) # would throw if called
+    r_chat2 = client.post("/api/project/chat", headers=headers, json={
+        "message": "Explain tests",
+        "project_id": "proj-llm-test"
+    })
+    assert r_chat2.status_code == 200
+    chat2_json = r_chat2.json()
+    assert "Limit Reached" in chat2_json["reply"]
+    assert chat2_json.get("llm_meta", {}).get("limit_reached") is True
+
+    # 4. Reset usage counter via POST /api/llm/reset-usage
+    r_reset = client.post("/api/llm/reset-usage", headers=headers)
+    assert r_reset.status_code == 200
+    assert r_reset.json()["config"]["usage_count"] == 0
+    assert r_reset.json()["config"]["limit_reached"] is False
+
+

@@ -78,11 +78,14 @@
     window.scrollTo({ top: 0, behavior: "smooth" });
 
     // Update nav widget visibility
+    const sideLlmBtn = document.getElementById("btn-side-llm-models");
     if (state.token && state.user) {
       nav.userWidget.style.display = "flex";
       nav.username.textContent = state.user.name || "Engineer";
+      if (sideLlmBtn) sideLlmBtn.style.display = "flex";
     } else {
       nav.userWidget.style.display = "none";
+      if (sideLlmBtn) sideLlmBtn.style.display = "none";
     }
 
     if (viewName === "chatbot") {
@@ -801,6 +804,7 @@
 
         showToast("Signed in in Demo Mode. Welcome, " + data.user.name, "success");
         switchView("dashboard");
+        loadLlmConfigAndModels();
       } catch (err) {
         errPw.textContent = err.message;
         errPw.style.display = "flex";
@@ -852,6 +856,7 @@
 
         showToast("Account created successfully! Welcome to CI_Agent.", "success");
         switchView("dashboard");
+        loadLlmConfigAndModels();
       } catch (err) {
         showToast(err.message, "error");
       } finally {
@@ -1442,6 +1447,21 @@
         state.activeChatSessionId = data.session_id;
       }
 
+      // Handle LLM Usage Metadata & Quota Tracking
+      if (data.llm_meta) {
+        if (typeof data.llm_meta.usage_count === "number") {
+          llmConfigData.usage_count = data.llm_meta.usage_count;
+        }
+        if (typeof data.llm_meta.usage_limit === "number") {
+          llmConfigData.usage_limit = data.llm_meta.usage_limit;
+        }
+        llmConfigData.limit_reached = !!data.llm_meta.limit_reached;
+        updateQuotaProgressUI(llmConfigData.usage_count, llmConfigData.usage_limit, llmConfigData.limit_reached);
+        if (data.llm_meta.limit_reached) {
+          showToast("⚠️ API key quota limit reached. Server requests paused.", "error");
+        }
+      }
+
       // Render AI Assistant Bubble
       const aiBubble = document.createElement("div");
       aiBubble.className = "chat-bubble chat-bubble-ai";
@@ -1942,6 +1962,465 @@
       btn.innerHTML = `<span>Approve & Push to GitHub</span>`;
     }
   });
+
+  // ===============================================================
+  // LLM Models & API Key Manager Component
+  // ===============================================================
+  let llmConfigData = {
+    provider: "local",
+    active_model: "qwen2.5:3b",
+    api_key: "",
+    masked_api_key: "",
+    has_api_key: false,
+    api_endpoint: "https://api.groq.com/openai/v1",
+    usage_limit: 50,
+    usage_count: 0,
+    limit_reached: false
+  };
+  let localModelsCache = [];
+  let serverModelsCache = [];
+
+  const drawerLlm = document.getElementById("drawer-llm-models");
+  const backdropLlm = document.getElementById("drawer-llm-backdrop");
+  const btnSideLlm = document.getElementById("btn-side-llm-models");
+  const btnNavLlm = document.getElementById("btn-nav-llm-models");
+  const btnCloseLlm = document.getElementById("btn-close-llm-drawer");
+
+  function openLlmDrawer() {
+    if (drawerLlm) drawerLlm.style.display = "flex";
+    if (backdropLlm) backdropLlm.style.display = "block";
+    loadLlmConfigAndModels();
+  }
+
+  function closeLlmDrawer() {
+    if (drawerLlm) drawerLlm.style.display = "none";
+    if (backdropLlm) backdropLlm.style.display = "none";
+  }
+
+  btnSideLlm?.addEventListener("click", openLlmDrawer);
+  btnNavLlm?.addEventListener("click", openLlmDrawer);
+  btnCloseLlm?.addEventListener("click", closeLlmDrawer);
+  backdropLlm?.addEventListener("click", closeLlmDrawer);
+
+  async function loadLlmConfigAndModels() {
+    try {
+      const res = await fetch("/api/llm/config", {
+        headers: { "Authorization": `Bearer ${state.token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      llmConfigData = data.config || {};
+      localModelsCache = data.local_models || [];
+      serverModelsCache = data.server_models || [];
+
+      // Update Local Count badge
+      const localCountEl = document.getElementById("local-models-count");
+      if (localCountEl) localCountEl.textContent = localModelsCache.length;
+
+      // Update Ollama status tag
+      const ollamaStatusEl = document.getElementById("ollama-daemon-status");
+      if (ollamaStatusEl) {
+        if (data.local_available) {
+          ollamaStatusEl.textContent = `● Ollama Connected (${localModelsCache.length} models)`;
+          ollamaStatusEl.className = "ollama-status-tag status-online";
+        } else {
+          ollamaStatusEl.textContent = "● Ollama Offline / Not Running";
+          ollamaStatusEl.className = "ollama-status-tag status-offline";
+        }
+      }
+
+      // Render local models list
+      renderLocalModelsList(localModelsCache, llmConfigData.active_model, llmConfigData.provider);
+
+      // Render server models dropdown
+      renderServerModelsDropdown(serverModelsCache, llmConfigData.active_model);
+
+      // Populate Server Form Inputs
+      const inputEndpoint = document.getElementById("input-api-endpoint");
+      if (inputEndpoint) inputEndpoint.value = llmConfigData.api_endpoint || "https://api.groq.com/openai/v1";
+
+      const inputApiKey = document.getElementById("input-api-key");
+      const keySavedIndicator = document.getElementById("key-saved-indicator");
+      if (inputApiKey) {
+        if (llmConfigData.has_api_key && llmConfigData.masked_api_key) {
+          inputApiKey.value = llmConfigData.masked_api_key;
+          if (keySavedIndicator) {
+            keySavedIndicator.style.display = "inline-block";
+            keySavedIndicator.textContent = "🔑 Key Stored in SQLite";
+          }
+        } else {
+          inputApiKey.value = "";
+          if (keySavedIndicator) keySavedIndicator.style.display = "none";
+        }
+      }
+
+      // Usage limit input
+      const inputLimit = document.getElementById("input-usage-limit");
+      if (inputLimit) inputLimit.value = llmConfigData.usage_limit || 50;
+
+      // Update Quota Progress UI
+      updateQuotaProgressUI(llmConfigData.usage_count || 0, llmConfigData.usage_limit || 50, llmConfigData.limit_reached);
+
+      // Update Engine Status Banner
+      updateActiveEngineBanner();
+
+      // Switch to the user's active tab
+      switchLlmTab(llmConfigData.provider || "local");
+
+    } catch (err) {
+      console.warn("LLM config load error:", err);
+    }
+  }
+
+  function renderLocalModelsList(models, activeModel, currentProvider) {
+    const listEl = document.getElementById("local-models-list");
+    const emptyEl = document.getElementById("local-models-empty");
+    if (!listEl) return;
+
+    if (!models || models.length === 0) {
+      listEl.innerHTML = "";
+      if (emptyEl) emptyEl.style.display = "block";
+      return;
+    }
+
+    if (emptyEl) emptyEl.style.display = "none";
+    listEl.innerHTML = models.map((m) => {
+      const isSelected = (currentProvider === "local" && (m.name === activeModel || m.model === activeModel));
+      return `
+        <div class="model-card ${isSelected ? 'active' : ''}" data-model="${escapeHtml(m.name)}" data-provider="local">
+          <div class="model-card-info">
+            <div class="model-card-title">
+              <span>💻 ${escapeHtml(m.name)}</span>
+              ${isSelected ? '<span class="badge-tag" style="background:var(--color-burgundy); color:var(--color-cream);">Active</span>' : ''}
+            </div>
+            <div class="model-card-meta">
+              <span class="badge-tag">${escapeHtml(m.param_size || "LLM")}</span>
+              <span class="badge-tag">${escapeHtml(m.size)}</span>
+              <span>Updated: ${escapeHtml(m.modified_at || "Recent")}</span>
+            </div>
+          </div>
+          <div class="model-card-action">
+            <div class="radio-indicator"></div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    listEl.querySelectorAll(".model-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const modelName = card.getAttribute("data-model");
+        selectModelOption("local", modelName);
+      });
+    });
+  }
+
+  function renderServerModelsDropdown(serverModels, activeModel) {
+    const selectEl = document.getElementById("select-server-model");
+    if (!selectEl) return;
+
+    selectEl.innerHTML = serverModels.map((m) => {
+      const isSelected = (m.id === activeModel);
+      return `<option value="${escapeHtml(m.id)}" data-endpoint="${escapeHtml(m.default_endpoint)}" data-desc="${escapeHtml(m.description)}" ${isSelected ? 'selected' : ''}>
+        ${escapeHtml(m.provider)}: ${escapeHtml(m.name)} [${escapeHtml(m.badge)}]
+      </option>`;
+    }).join("") + `<option value="custom" data-endpoint="" data-desc="Use any OpenAI-compatible provider (vLLM, Ollama cloud, custom LLM gateway)">Custom Endpoint...</option>`;
+
+    const isCustom = !serverModels.some(m => m.id === activeModel);
+    if (isCustom && activeModel && activeModel !== "qwen2.5:3b") {
+      selectEl.value = "custom";
+      const customGrp = document.getElementById("grp-custom-model");
+      const customInp = document.getElementById("input-custom-model");
+      if (customGrp) customGrp.style.display = "block";
+      if (customInp) customInp.value = activeModel;
+    }
+
+    updateServerModelDetails();
+  }
+
+  function updateServerModelDetails() {
+    const select = document.getElementById("select-server-model");
+    if (!select) return;
+    const selectedOpt = select.options[select.selectedIndex];
+    const descEl = document.getElementById("server-model-description");
+    const customGrp = document.getElementById("grp-custom-model");
+    const endpointInput = document.getElementById("input-api-endpoint");
+
+    if (select.value === "custom") {
+      if (customGrp) customGrp.style.display = "block";
+      if (descEl) descEl.textContent = "Custom OpenAI-compatible provider. Enter custom model identifier and endpoint below.";
+    } else {
+      if (customGrp) customGrp.style.display = "none";
+      if (descEl && selectedOpt) {
+        descEl.textContent = selectedOpt.getAttribute("data-desc") || "";
+      }
+      if (endpointInput && selectedOpt && selectedOpt.getAttribute("data-endpoint")) {
+        endpointInput.value = selectedOpt.getAttribute("data-endpoint");
+      }
+    }
+  }
+
+  document.getElementById("select-server-model")?.addEventListener("change", updateServerModelDetails);
+
+  function selectModelOption(provider, modelName) {
+    llmConfigData.provider = provider;
+    llmConfigData.active_model = modelName;
+    updateActiveEngineBanner();
+    renderLocalModelsList(localModelsCache, llmConfigData.active_model, llmConfigData.provider);
+  }
+
+  function updateActiveEngineBanner() {
+    const dot = document.getElementById("engine-status-dot");
+    const label = document.getElementById("engine-status-label");
+    const badge = document.getElementById("engine-status-badge");
+    const sideLabel = document.querySelector(".side-llm-label");
+
+    const isServer = llmConfigData.provider === "server";
+    const model = llmConfigData.active_model || (isServer ? "Cloud Server" : "qwen2.5:3b");
+
+    if (label) {
+      label.textContent = isServer ? `Active: Cloud Server (${model})` : `Active: Local (${model})`;
+    }
+    if (badge) {
+      badge.textContent = isServer ? "Cloud API" : "Local Engine";
+      badge.style.background = isServer ? "var(--color-burgundy-light)" : "var(--color-burgundy)";
+    }
+    if (dot) {
+      dot.style.background = isServer ? (llmConfigData.limit_reached ? "var(--color-danger)" : "#4ADE80") : "var(--color-success)";
+    }
+    if (sideLabel) {
+      const shortName = model.split(":")[0].split("/").pop().slice(0, 10);
+      sideLabel.textContent = `Models (${shortName})`;
+    }
+  }
+
+  function updateQuotaProgressUI(usageCount, usageLimit, limitReached) {
+    const usageText = document.getElementById("quota-usage-text");
+    const percentText = document.getElementById("quota-percent-text");
+    const progressBar = document.getElementById("quota-progress-bar");
+    const alertBox = document.getElementById("alert-quota-reached");
+
+    const limit = Math.max(1, parseInt(usageLimit) || 50);
+    const count = Math.max(0, parseInt(usageCount) || 0);
+    const percent = Math.min(100, Math.round((count / limit) * 100));
+
+    if (usageText) usageText.innerHTML = `Used: <strong>${count} / ${limit}</strong> requests`;
+    if (percentText) percentText.textContent = `${percent}%`;
+
+    if (progressBar) {
+      progressBar.style.width = `${percent}%`;
+      progressBar.classList.remove("warn", "danger");
+      if (percent >= 100 || limitReached) {
+        progressBar.classList.add("danger");
+      } else if (percent >= 70) {
+        progressBar.classList.add("warn");
+      }
+    }
+
+    if (alertBox) {
+      alertBox.style.display = (limitReached || count >= limit) ? "flex" : "none";
+    }
+  }
+
+  function switchLlmTab(tabName) {
+    const tabLocal = document.getElementById("tab-llm-local");
+    const tabServer = document.getElementById("tab-llm-server");
+    const panelLocal = document.getElementById("panel-llm-local");
+    const panelServer = document.getElementById("panel-llm-server");
+
+    if (tabName === "local") {
+      tabLocal?.classList.add("active");
+      tabServer?.classList.remove("active");
+      if (panelLocal) panelLocal.style.display = "block";
+      if (panelServer) panelServer.style.display = "none";
+    } else {
+      tabServer?.classList.add("active");
+      tabLocal?.classList.remove("active");
+      if (panelServer) panelServer.style.display = "block";
+      if (panelLocal) panelLocal.style.display = "none";
+    }
+  }
+
+  document.getElementById("tab-llm-local")?.addEventListener("click", () => switchLlmTab("local"));
+  document.getElementById("tab-llm-server")?.addEventListener("click", () => switchLlmTab("server"));
+  document.getElementById("btn-switch-to-server-empty")?.addEventListener("click", () => switchLlmTab("server"));
+
+  // API Key show/hide toggle
+  const btnToggleKey = document.getElementById("btn-toggle-key-visibility");
+  const inputKey = document.getElementById("input-api-key");
+  btnToggleKey?.addEventListener("click", () => {
+    if (inputKey.type === "password") {
+      inputKey.type = "text";
+      btnToggleKey.textContent = "🔒";
+    } else {
+      inputKey.type = "password";
+      btnToggleKey.textContent = "👁️";
+    }
+  });
+
+  // Re-scan Ollama models
+  document.getElementById("btn-refresh-local-models")?.addEventListener("click", async () => {
+    const btn = document.getElementById("btn-refresh-local-models");
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Scanning...`;
+    try {
+      const res = await fetch("/api/llm/local-models");
+      const data = await res.json();
+      localModelsCache = data.models || [];
+      const localCountEl = document.getElementById("local-models-count");
+      if (localCountEl) localCountEl.textContent = localModelsCache.length;
+      renderLocalModelsList(localModelsCache, llmConfigData.active_model, llmConfigData.provider);
+      showToast(`Discovered ${localModelsCache.length} local Ollama models`, "info");
+    } catch (err) {
+      showToast("Failed to scan local Ollama models", "error");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `<span>🔄 Re-scan Ollama Models</span>`;
+    }
+  });
+
+  // Reset Quota Counter
+  document.getElementById("btn-reset-quota")?.addEventListener("click", async () => {
+    if (!confirm("Reset API request counter back to 0?")) return;
+    try {
+      const res = await fetch("/api/llm/reset-usage", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${state.token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to reset quota");
+
+      llmConfigData = data.config;
+      updateQuotaProgressUI(0, llmConfigData.usage_limit, false);
+      updateActiveEngineBanner();
+      showToast("API request counter reset to 0", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  // Test Connection
+  const btnTestConn = document.getElementById("btn-test-llm-connection");
+  btnTestConn?.addEventListener("click", async () => {
+    btnTestConn.disabled = true;
+    btnTestConn.innerHTML = `<span class="spinner"></span> Testing...`;
+    const resBox = document.getElementById("test-connection-result");
+    if (resBox) {
+      resBox.style.display = "block";
+      resBox.className = "test-result-box";
+      resBox.innerHTML = `<span class="spinner"></span> Sending test ping to API endpoint...`;
+    }
+
+    try {
+      const selectServer = document.getElementById("select-server-model");
+      let model = selectServer?.value === "custom"
+        ? (document.getElementById("input-custom-model")?.value.trim() || "llama-3.3-70b-versatile")
+        : (selectServer?.value || "llama-3.3-70b-versatile");
+      const endpoint = document.getElementById("input-api-endpoint")?.value.trim() || "https://api.groq.com/openai/v1";
+      const apiKey = document.getElementById("input-api-key")?.value.trim() || "";
+
+      const res = await fetch("/api/llm/test-connection", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
+        body: JSON.stringify({
+          provider: "server",
+          model,
+          api_endpoint: endpoint,
+          api_key: apiKey
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Connection test failed");
+
+      if (resBox) {
+        resBox.className = "test-result-box success";
+        resBox.innerHTML = `<strong>✓ Connection Verified (${data.latency_ms}ms latency)!</strong><br>Provider replied: <em>"${escapeHtml(data.response_snippet)}"</em>`;
+      }
+      showToast("API connection successfully verified!", "success");
+
+    } catch (err) {
+      if (resBox) {
+        resBox.className = "test-result-box error";
+        resBox.innerHTML = `<strong>✗ Connection Failed</strong><br>${escapeHtml(err.message)}`;
+      }
+      showToast(err.message, "error");
+    } finally {
+      btnTestConn.disabled = false;
+      btnTestConn.innerHTML = `<span>🧪 Test Connection</span>`;
+    }
+  });
+
+  // Save LLM Config
+  const btnSaveLlm = document.getElementById("btn-save-llm-config");
+  btnSaveLlm?.addEventListener("click", async () => {
+    btnSaveLlm.disabled = true;
+    btnSaveLlm.innerHTML = `<span class="spinner"></span> Saving...`;
+
+    try {
+      const activeTab = document.getElementById("tab-llm-server")?.classList.contains("active") ? "server" : "local";
+      let activeModel = llmConfigData.active_model || "qwen2.5:3b";
+      let endpoint = document.getElementById("input-api-endpoint")?.value.trim() || "https://api.groq.com/openai/v1";
+      const limit = parseInt(document.getElementById("input-usage-limit")?.value) || 50;
+      const apiKeyInput = document.getElementById("input-api-key")?.value.trim() || "";
+
+      if (activeTab === "server") {
+        const selectServer = document.getElementById("select-server-model");
+        if (selectServer?.value === "custom") {
+          activeModel = document.getElementById("input-custom-model")?.value.trim() || "custom-model";
+        } else if (selectServer) {
+          activeModel = selectServer.value;
+        }
+      }
+
+      const payload = {
+        provider: activeTab,
+        active_model: activeModel,
+        api_key: apiKeyInput,
+        api_endpoint: endpoint,
+        usage_limit: limit
+      };
+
+      const res = await fetch("/api/llm/config", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save LLM configuration");
+
+      llmConfigData = data.config;
+      updateActiveEngineBanner();
+      updateQuotaProgressUI(llmConfigData.usage_count, llmConfigData.usage_limit, llmConfigData.limit_reached);
+
+      const keySavedIndicator = document.getElementById("key-saved-indicator");
+      if (keySavedIndicator && llmConfigData.has_api_key) {
+        keySavedIndicator.style.display = "inline-block";
+        keySavedIndicator.textContent = "🔑 Key Stored in SQLite";
+      }
+
+      showToast(`Engine active: ${activeTab === 'local' ? 'Local' : 'Cloud Server'} (${activeModel})`, "success");
+      closeLlmDrawer();
+
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      btnSaveLlm.disabled = false;
+      btnSaveLlm.innerHTML = `<span>💾 Save &amp; Activate</span>`;
+    }
+  });
+
+  // Check LLM config on initial load if token exists
+  if (state.token) {
+    loadLlmConfigAndModels();
+  }
 
   // Initialize
   initRouting();

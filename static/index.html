@@ -71,6 +71,10 @@
             <span>🤖</span>
             <span>Chatbot</span>
           </button>
+          <button id="btn-nav-llm-models" class="btn btn-sm btn-outline" title="LLM Models & API Keys" style="padding: 2px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px;">
+            <span>⚡</span>
+            <span>Models &amp; API</span>
+          </button>
           <button id="btn-open-change-pw" class="btn btn-sm btn-outline" title="Change password" style="padding: 2px 8px; font-size: 0.75rem;">Password</button>
           <button id="btn-signout" class="btn btn-sm btn-outline" title="Sign out" style="padding: 2px 8px; font-size: 0.75rem;">Sign out</button>
         </div>
@@ -1016,6 +1020,185 @@
         </div>
       </div>
     </div>
+
+    <!-- Floating Side Button for LLM Models & API Key Settings (Visible after login) -->
+    <button id="btn-side-llm-models" class="btn-side-llm-floating" type="button" title="Configure LLM Models &amp; API Key Quota" style="display: none;">
+      <span class="side-llm-pulse-dot"></span>
+      <span class="side-llm-icon">⚡</span>
+      <span class="side-llm-label">Models &amp; API</span>
+    </button>
+
+    <!-- Drawer Backdrop -->
+    <div id="drawer-llm-backdrop" class="drawer-backdrop" style="display: none;"></div>
+
+    <!-- Drawer: LLM Models & API Key Manager -->
+    <aside id="drawer-llm-models" class="drawer-llm-panel" style="display: none;" aria-label="LLM Models &amp; API Key Manager">
+      <div class="drawer-header">
+        <div class="drawer-title-group">
+          <div class="drawer-icon-badge">⚡</div>
+          <div>
+            <h3 class="drawer-title">LLM Models &amp; API Keys</h3>
+            <p class="drawer-subtitle">Switch local models, server APIs, and manage request limits</p>
+          </div>
+        </div>
+        <button id="btn-close-llm-drawer" class="btn-drawer-close" type="button" aria-label="Close drawer">✕</button>
+      </div>
+
+      <!-- Active Engine Status Pill -->
+      <div class="active-engine-banner" id="active-engine-banner">
+        <div class="engine-indicator">
+          <span class="engine-dot" id="engine-status-dot"></span>
+          <span class="engine-label" id="engine-status-label">Active: Local (qwen2.5:3b)</span>
+        </div>
+        <span class="badge-engine" id="engine-status-badge">Local Engine</span>
+      </div>
+
+      <!-- Engine Mode Switcher Tabs -->
+      <div class="drawer-tabs">
+        <button type="button" class="drawer-tab active" id="tab-llm-local" data-tab="local">
+          <span>💻 Local Models</span>
+          <span class="tab-count-badge" id="local-models-count">0</span>
+        </button>
+        <button type="button" class="drawer-tab" id="tab-llm-server" data-tab="server">
+          <span>☁️ Cloud Server &amp; API Key</span>
+        </button>
+      </div>
+
+      <div class="drawer-body">
+        <!-- TAB 1: LOCAL DOWNLOADED MODELS -->
+        <section id="panel-llm-local" class="drawer-tab-content active">
+          <div class="tab-intro">
+            <div class="tab-intro-title">Downloaded Ollama Models</div>
+            <p class="tab-intro-desc">Models discovered on your local machine. 100% private, runs offline, zero API costs.</p>
+          </div>
+
+          <div class="local-models-actions">
+            <button type="button" id="btn-refresh-local-models" class="btn btn-sm btn-outline" style="font-size: 0.78rem;">
+              <span>🔄 Re-scan Ollama Models</span>
+            </button>
+            <span id="ollama-daemon-status" class="ollama-status-tag status-online">● Checking status...</span>
+          </div>
+
+          <div id="local-models-list" class="models-grid">
+            <!-- Populated dynamically by app.js -->
+          </div>
+
+          <div id="local-models-empty" class="empty-models-notice" style="display: none;">
+            <div class="empty-icon">⚠️</div>
+            <div class="empty-title">No Local Models Detected</div>
+            <p class="empty-desc">
+              Ollama is not running on <code>http://localhost:11434</code> or no models are downloaded yet.
+            </p>
+            <button type="button" id="btn-switch-to-server-empty" class="btn btn-sm btn-primary" style="margin-top: 10px;">
+              <span>Use Cloud Server Models with API Key ➔</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- TAB 2: CLOUD SERVER MODELS & API KEY -->
+        <section id="panel-llm-server" class="drawer-tab-content" style="display: none;">
+          <div class="tab-intro">
+            <div class="tab-intro-title">Cloud Server Models &amp; User API Key</div>
+            <p class="tab-intro-desc">Access high-performance hosted LLMs (Groq, OpenAI, OpenRouter) by entering your personal API key.</p>
+          </div>
+
+          <!-- Curated Server Model Picker -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label" for="select-server-model">Select Cloud Model</label>
+            <select id="select-server-model" class="form-control" style="font-size: 0.9rem;">
+              <!-- Populated dynamically from CURATED_SERVER_MODELS -->
+            </select>
+            <div id="server-model-description" class="field-hint" style="margin-top: 6px; font-size: 0.8rem; color: var(--color-text-muted);">
+              Ultra-fast state-of-the-art coding and architecture model (128k context)
+            </div>
+          </div>
+
+          <!-- Custom Model Identifier (if custom selected) -->
+          <div class="form-group" id="grp-custom-model" style="display: none; margin-bottom: 16px;">
+            <label class="form-label" for="input-custom-model">Custom Model Identifier</label>
+            <input type="text" id="input-custom-model" class="form-control" placeholder="e.g. meta-llama/llama-3.3-70b-instruct">
+          </div>
+
+          <!-- API Base Endpoint -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label class="form-label" for="input-api-endpoint">API Base Endpoint</label>
+            <input type="url" id="input-api-endpoint" class="form-control font-mono" placeholder="https://api.groq.com/openai/v1" value="https://api.groq.com/openai/v1">
+            <div class="field-hint" style="font-size: 0.78rem; color: var(--color-text-muted); margin-top: 4px;">
+              OpenAI-compatible chat completions endpoint URL.
+            </div>
+          </div>
+
+          <!-- API Key Input with Show/Hide -->
+          <div class="form-group" style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label class="form-label" for="input-api-key" style="margin: 0;">Personal API Key</label>
+              <span class="key-status-indicator" id="key-saved-indicator">🔑 Key Stored in SQLite</span>
+            </div>
+            <div class="api-key-input-wrapper">
+              <input type="password" id="input-api-key" class="form-control font-mono" placeholder="Paste your API key (e.g. gsk_... or sk-...)" autocomplete="off">
+              <button type="button" id="btn-toggle-key-visibility" class="btn-toggle-pw" title="Show / Hide API Key">👁️</button>
+            </div>
+            <div class="field-hint" style="font-size: 0.78rem; color: var(--color-text-muted); margin-top: 5px;">
+              🔒 Encrypted SQLite storage in <code>users.db</code>. Plaintext keys are never sent back to browser.
+            </div>
+          </div>
+
+          <!-- Usage Limit & Quota Meter -->
+          <div class="quota-container">
+            <div class="quota-header">
+              <div>
+                <span class="quota-title">API Request Usage &amp; Quota Limit</span>
+                <div class="quota-subtitle">Prevents unexpected billing by pausing queries at limit</div>
+              </div>
+              <button type="button" id="btn-reset-quota" class="btn btn-sm btn-outline" style="font-size: 0.75rem; padding: 3px 8px;">
+                🔄 Reset Counter
+              </button>
+            </div>
+
+            <div class="form-group" style="margin-top: 10px; margin-bottom: 12px;">
+              <label class="form-label" for="input-usage-limit">Max Allowed Requests</label>
+              <input type="number" id="input-usage-limit" class="form-control" min="1" max="10000" value="50" style="width: 140px;">
+            </div>
+
+            <!-- Progress Bar & Count -->
+            <div class="quota-meter">
+              <div class="meter-labels">
+                <span id="quota-usage-text">Used: <strong>0 / 50</strong> requests</span>
+                <span id="quota-percent-text" class="meter-percent">0%</span>
+              </div>
+              <div class="progress-track">
+                <div class="progress-fill" id="quota-progress-bar" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <!-- Quota Limit Reached Alert -->
+            <div id="alert-quota-reached" class="quota-alert-box" style="display: none;">
+              <div class="quota-alert-icon">⚠️</div>
+              <div class="quota-alert-content">
+                <strong>Request Quota Limit Reached!</strong>
+                <p>Your API key has reached its configured quota limit. Cloud requests are blocked to prevent additional charges. Click <em>"Reset Counter"</em> or raise your limit above to continue.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Connection Test Results Box -->
+          <div id="test-connection-result" class="test-result-box" style="display: none;"></div>
+
+        </section>
+      </div>
+
+      <!-- Drawer Footer Actions -->
+      <div class="drawer-footer">
+        <div style="display: flex; gap: 10px; width: 100%;">
+          <button type="button" id="btn-test-llm-connection" class="btn btn-outline" style="flex: 1; justify-content: center; font-size: 0.85rem;">
+            <span>🧪 Test Connection</span>
+          </button>
+          <button type="button" id="btn-save-llm-config" class="btn btn-primary" style="flex: 1.5; justify-content: center; font-size: 0.88rem; font-weight: 700;">
+            <span>💾 Save &amp; Activate</span>
+          </button>
+        </div>
+      </div>
+    </aside>
 
   </main>
 

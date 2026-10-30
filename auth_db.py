@@ -68,6 +68,20 @@ def init_db():
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);")
+
+        # User LLM Configuration, API Key Storage & Usage Limit Tracking
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_llm_configs (
+                user_id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL DEFAULT 'local',
+                active_model TEXT NOT NULL DEFAULT 'qwen2.5:3b',
+                api_key TEXT,
+                api_endpoint TEXT,
+                usage_limit INTEGER NOT NULL DEFAULT 50,
+                usage_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+        """)
         conn.commit()
 
         # Seed default engineer account if empty
@@ -411,6 +425,176 @@ def clear_all_user_chats(user_id: Optional[str] = None) -> bool:
             cursor.execute("DELETE FROM chat_sessions")
         conn.commit()
         return True
+
+
+# ==========================================
+# User LLM Config, API Key & Usage Limits
+# ==========================================
+def mask_api_key(key: Optional[str]) -> str:
+    """Masks secret API key for secure UI presentation, e.g. gsk_••••••••••••3a9b."""
+    if not key or not isinstance(key, str):
+        return ""
+    stripped = key.strip()
+    if len(stripped) <= 8:
+        return "••••" + (stripped[-2:] if len(stripped) > 2 else "")
+    prefix = ""
+    rest = stripped
+    if "_" in stripped:
+        parts = stripped.split("_", 1)
+        prefix = parts[0] + "_"
+        rest = parts[1]
+    elif stripped.startswith("sk-"):
+        prefix = "sk-"
+        rest = stripped[3:]
+
+    if len(rest) > 4:
+        return f"{prefix}••••••••••••{rest[-4:]}"
+    return f"{prefix}••••••••{rest}"
+
+
+def get_user_llm_config(user_id: str, raw_key: bool = False) -> Dict[str, Any]:
+    """Retrieves user LLM configuration. By default masks API key for client security."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT user_id, provider, active_model, api_key, api_endpoint, usage_limit, usage_count, updated_at
+            FROM user_llm_configs
+            WHERE user_id = ?
+        """, (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            now_iso = time.strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                "user_id": user_id,
+                "provider": "local",
+                "active_model": "qwen2.5:3b",
+                "api_key": "",
+                "masked_api_key": "",
+                "has_api_key": False,
+                "api_endpoint": "https://api.groq.com/openai/v1",
+                "usage_limit": 50,
+                "usage_count": 0,
+                "limit_reached": False,
+                "updated_at": now_iso
+            }
+
+        raw_api_key = row["api_key"] or ""
+        usage_limit = row["usage_limit"] if row["usage_limit"] is not None else 50
+        usage_count = row["usage_count"] if row["usage_count"] is not None else 0
+        limit_reached = (row["provider"] == "server") and (usage_count >= usage_limit)
+
+        return {
+            "user_id": row["user_id"],
+            "provider": row["provider"],
+            "active_model": row["active_model"],
+            "api_key": raw_api_key if raw_key else mask_api_key(raw_api_key),
+            "masked_api_key": mask_api_key(raw_api_key),
+            "has_api_key": bool(raw_api_key.strip()),
+            "api_endpoint": row["api_endpoint"] or "https://api.groq.com/openai/v1",
+            "usage_limit": usage_limit,
+            "usage_count": usage_count,
+            "limit_reached": limit_reached,
+            "updated_at": row["updated_at"]
+        }
+
+
+def save_user_llm_config(
+    user_id: str,
+    provider: str = "local",
+    active_model: str = "qwen2.5:3b",
+    api_key: Optional[str] = None,
+    api_endpoint: Optional[str] = None,
+    usage_limit: Optional[int] = None
+) -> Dict[str, Any]:
+    """Saves or updates user LLM config, keeping existing API key if masked string is passed."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT api_key, usage_limit, usage_count, api_endpoint FROM user_llm_configs WHERE user_id = ?", (user_id,))
+        existing = cursor.fetchone()
+
+        # Preserve existing API key if candidate is empty or masked
+        final_key = existing["api_key"] if existing and existing["api_key"] else ""
+        if api_key is not None and api_key.strip():
+            candidate = api_key.strip()
+            if "••" not in candidate:
+                final_key = candidate
+
+        final_endpoint = api_endpoint.strip() if api_endpoint and api_endpoint.strip() else (
+            existing["api_endpoint"] if existing and existing["api_endpoint"] else "https://api.groq.com/openai/v1"
+        )
+
+        final_limit = usage_limit if (usage_limit is not None and usage_limit > 0) else (
+            existing["usage_limit"] if existing and existing["usage_limit"] is not None else 50
+        )
+
+        now_iso = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        if existing:
+            cursor.execute("""
+                UPDATE user_llm_configs
+                SET provider = ?, active_model = ?, api_key = ?, api_endpoint = ?, usage_limit = ?, updated_at = ?
+                WHERE user_id = ?
+            """, (provider, active_model, final_key, final_endpoint, final_limit, now_iso, user_id))
+        else:
+            cursor.execute("""
+                INSERT INTO user_llm_configs (user_id, provider, active_model, api_key, api_endpoint, usage_limit, usage_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, provider, active_model, final_key, final_endpoint, final_limit, 0, now_iso))
+
+        conn.commit()
+
+    return get_user_llm_config(user_id, raw_key=False)
+
+
+def increment_user_llm_usage(user_id: str) -> Dict[str, Any]:
+    """Increments request counter for user server model API key and reports limit status."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT usage_count, usage_limit FROM user_llm_configs WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        now_iso = time.strftime("%Y-%m-%d %H:%M:%S")
+        if not row:
+            cursor.execute("""
+                INSERT INTO user_llm_configs (user_id, provider, active_model, usage_limit, usage_count, updated_at)
+                VALUES (?, 'local', 'qwen2.5:3b', 50, 1, ?)
+            """, (user_id, now_iso))
+            conn.commit()
+            return {"usage_count": 1, "usage_limit": 50, "limit_reached": False}
+
+        new_count = (row["usage_count"] or 0) + 1
+        limit = row["usage_limit"] or 50
+        cursor.execute("UPDATE user_llm_configs SET usage_count = ?, updated_at = ? WHERE user_id = ?",
+                       (new_count, now_iso, user_id))
+        conn.commit()
+        return {
+            "usage_count": new_count,
+            "usage_limit": limit,
+            "limit_reached": new_count >= limit
+        }
+
+
+def reset_user_llm_usage(user_id: str) -> Dict[str, Any]:
+    """Resets the usage counter back to 0 for the user."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        now_iso = time.strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("UPDATE user_llm_configs SET usage_count = 0, updated_at = ? WHERE user_id = ?",
+                       (now_iso, user_id))
+        conn.commit()
+    return get_user_llm_config(user_id, raw_key=False)
+
+
+def is_user_llm_limit_reached(user_id: str) -> bool:
+    """Returns True if the user is using server models and has reached their quota limit."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT provider, usage_count, usage_limit FROM user_llm_configs WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        if row["provider"] != "server":
+            return False
+        return (row["usage_count"] or 0) >= (row["usage_limit"] or 50)
 
 
 # Auto-initialize DB on import

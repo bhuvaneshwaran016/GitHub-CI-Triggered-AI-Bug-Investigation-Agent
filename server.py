@@ -12,6 +12,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import urllib.error
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -122,6 +124,229 @@ class ApprovePushRequest(BaseModel):
     job_id: str
     branch: Optional[str] = "main"
     commit_message: Optional[str] = None
+
+class LLMConfigUpdateRequest(BaseModel):
+    provider: str = Field(..., description="'local' or 'server'")
+    active_model: str = Field(..., description="Selected model name")
+    api_key: Optional[str] = Field(None, description="Secret API key (or masked placeholder)")
+    api_endpoint: Optional[str] = Field("https://api.groq.com/openai/v1", description="OpenAI-compatible base URL")
+    usage_limit: Optional[int] = Field(50, description="Max allowed server requests")
+
+class LLMTestRequest(BaseModel):
+    provider: Optional[str] = "server"
+    model: Optional[str] = "llama-3.3-70b-versatile"
+    api_key: Optional[str] = None
+    api_endpoint: Optional[str] = "https://api.groq.com/openai/v1"
+
+
+CURATED_SERVER_MODELS = [
+    {
+        "id": "llama-3.3-70b-versatile",
+        "name": "Llama 3.3 70B Versatile",
+        "provider": "Groq",
+        "default_endpoint": "https://api.groq.com/openai/v1",
+        "description": "Ultra-fast state-of-the-art reasoning & code synthesis (128k context)",
+        "badge": "Recommended"
+    },
+    {
+        "id": "llama-3.1-8b-instant",
+        "name": "Llama 3.1 8B Instant",
+        "provider": "Groq",
+        "default_endpoint": "https://api.groq.com/openai/v1",
+        "description": "Sub-second response speed for rapid unit testing & analysis",
+        "badge": "Fastest"
+    },
+    {
+        "id": "mixtral-8x7b-32768",
+        "name": "Mixtral 8x7B MoE",
+        "provider": "Groq",
+        "default_endpoint": "https://api.groq.com/openai/v1",
+        "description": "Deep multi-expert architecture with 32k context window",
+        "badge": "MoE"
+    },
+    {
+        "id": "gpt-4o-mini",
+        "name": "GPT-4o Mini",
+        "provider": "OpenAI",
+        "default_endpoint": "https://api.openai.com/v1",
+        "description": "OpenAI low-latency code model with superior precision",
+        "badge": "OpenAI"
+    },
+    {
+        "id": "gpt-4o",
+        "name": "GPT-4o",
+        "provider": "OpenAI",
+        "default_endpoint": "https://api.openai.com/v1",
+        "description": "Flagship OpenAI model with full multi-step coding depth",
+        "badge": "OpenAI"
+    },
+    {
+        "id": "meta-llama/llama-3.3-70b-instruct",
+        "name": "Llama 3.3 70B Instruct",
+        "provider": "OpenRouter",
+        "default_endpoint": "https://openrouter.ai/api/v1",
+        "description": "OpenRouter multi-model gateway with pay-per-token flexibility",
+        "badge": "OpenRouter"
+    },
+    {
+        "id": "deepseek/deepseek-chat",
+        "name": "DeepSeek V3 / R1",
+        "provider": "OpenRouter",
+        "default_endpoint": "https://openrouter.ai/api/v1",
+        "description": "DeepSeek open-weight flagship for code comprehension",
+        "badge": "DeepSeek"
+    }
+]
+
+
+def fetch_local_ollama_models() -> Dict[str, Any]:
+    """Queries local Ollama daemon for downloaded models."""
+    ollama_url = getattr(ci_backend, "OLLAMA_API_URL", "http://localhost:11434/api/generate")
+    base_url = ollama_url.split("/api/")[0]
+    tags_url = f"{base_url}/api/tags"
+
+    try:
+        req = urllib.request.Request(tags_url, headers={"User-Agent": "CI_Agent"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            raw_models = data.get("models", [])
+            formatted = []
+            for m in raw_models:
+                size_bytes = m.get("size", 0)
+                size_gb = f"{size_bytes / (1024**3):.1f} GB" if size_bytes else "N/A"
+                details = m.get("details", {})
+                param_size = details.get("parameter_size", "")
+                family = details.get("family", "")
+                formatted.append({
+                    "name": m.get("name", ""),
+                    "model": m.get("model", m.get("name", "")),
+                    "size": size_gb,
+                    "param_size": param_size,
+                    "family": family,
+                    "modified_at": m.get("modified_at", "")[:10]
+                })
+            return {"available": True, "models": formatted}
+    except Exception as e:
+        return {"available": False, "models": [], "error": str(e)}
+
+
+def query_llm_for_user(user_id: Optional[str], prompt: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Unified LLM query dispatcher.
+    If user_id is provided and user has selected a server model:
+      - Validates usage limit (blocks if usage_count >= usage_limit).
+      - Queries OpenAI-compatible cloud endpoint with user's stored API key.
+      - Increments usage_count.
+    Otherwise, invokes the selected local Ollama model.
+    """
+    if not user_id:
+        return ci_backend.query_ollama_llm(prompt), {
+            "provider": "local",
+            "model": getattr(ci_backend, "OLLAMA_MODEL", "qwen2.5:3b")
+        }
+
+    config = auth_db.get_user_llm_config(user_id, raw_key=True)
+    provider = config.get("provider", "local")
+
+    if provider == "server":
+        usage_count = config.get("usage_count", 0)
+        usage_limit = config.get("usage_limit", 50)
+
+        # Enforce usage quota limit
+        if usage_count >= usage_limit:
+            error_msg = (
+                f"⚠️ [API Quota Limit Reached] Your API key usage has reached its maximum quota "
+                f"({usage_count}/{usage_limit} requests). To prevent unexpected charges, requests are paused. "
+                f"Open the 'Models & API' side panel to reset your counter or raise your limit."
+            )
+            return error_msg, {
+                "provider": "server",
+                "model": config.get("active_model", ""),
+                "limit_reached": True,
+                "usage_count": usage_count,
+                "usage_limit": usage_limit
+            }
+
+        api_key = config.get("api_key", "").strip()
+        if not api_key:
+            return (
+                "⚠️ [API Key Required] You have selected a Cloud Server model, but no API key is configured. "
+                "Click the 'Models & API' side button to paste your API key and activate server mode.",
+                {"provider": "server", "model": config.get("active_model", ""), "error": "missing_api_key"}
+            )
+
+        endpoint = config.get("api_endpoint", "https://api.groq.com/openai/v1").rstrip("/")
+        chat_url = endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
+        active_model = config.get("active_model", "llama-3.3-70b-versatile")
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "CI_Agent/1.0"
+        }
+        payload = {
+            "model": active_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2
+        }
+
+        try:
+            req = urllib.request.Request(chat_url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp_data = json.loads(resp.read().decode("utf-8"))
+                reply_text = ""
+                if "choices" in resp_data and len(resp_data["choices"]) > 0:
+                    reply_text = resp_data["choices"][0].get("message", {}).get("content", "")
+
+                # Increment usage upon success
+                usage_info = auth_db.increment_user_llm_usage(user_id)
+                return reply_text or "No text generated by server model.", {
+                    "provider": "server",
+                    "model": active_model,
+                    "usage_count": usage_info["usage_count"],
+                    "usage_limit": usage_info["usage_limit"],
+                    "limit_reached": usage_info["limit_reached"]
+                }
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            return f"⚠️ [Cloud Provider Error {e.code}] {err_body[:300]}", {
+                "provider": "server",
+                "model": active_model,
+                "error": f"HTTP {e.code}"
+            }
+        except Exception as e:
+            return f"⚠️ [Server Model Connection Error] Could not connect to {endpoint}: {str(e)}", {
+                "provider": "server",
+                "model": active_model,
+                "error": str(e)
+            }
+    else:
+        # Local Ollama model
+        active_model = config.get("active_model", getattr(ci_backend, "OLLAMA_MODEL", "qwen2.5:3b"))
+        ollama_url = getattr(ci_backend, "OLLAMA_API_URL", "http://localhost:11434/api/generate")
+        payload = {
+            "model": active_model,
+            "prompt": prompt,
+            "stream": False
+        }
+        try:
+            req = urllib.request.Request(ollama_url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data.get("response", ""), {
+                    "provider": "local",
+                    "model": active_model,
+                    "usage_count": config.get("usage_count", 0),
+                    "usage_limit": config.get("usage_limit", 50),
+                    "limit_reached": False
+                }
+        except Exception as e:
+            res = ci_backend.query_ollama_llm(prompt)
+            return res, {
+                "provider": "local",
+                "model": active_model,
+                "notice": str(e)
+            }
 
 
 # --- Authentication Helpers ---
@@ -630,7 +855,7 @@ def project_chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
         f"- Keep explanations clear, professional, and directly actionable."
     )
 
-    reply = ci_backend.query_ollama_llm(prompt)
+    reply, llm_meta = query_llm_for_user(user_id, prompt)
     if not reply.strip():
         reply = (
             f"Based on the analyzed project architecture, this system is organized into modular services with automated test verification. "
@@ -646,7 +871,8 @@ def project_chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
         "reply": reply,
         "sources": sources_list,
         "session_id": session_id,
-        "project_id": proj_id
+        "project_id": proj_id,
+        "llm_meta": llm_meta
     }
 
 
@@ -788,6 +1014,115 @@ def clean_workspace_endpoint(
         }
     else:
         raise HTTPException(status_code=400, detail="Must provide project_id or clean_all=true")
+
+
+# ==========================================
+# LLM Models & API Key Management Endpoints
+# ==========================================
+@app.get("/api/llm/config")
+def get_llm_config_endpoint(authorization: Optional[str] = Header(None)):
+    user = verify_session(authorization)
+    user_id = user.get("id", "user-demo-lead")
+    config = auth_db.get_user_llm_config(user_id, raw_key=False)
+    local_info = fetch_local_ollama_models()
+    return {
+        "config": config,
+        "local_models": local_info.get("models", []),
+        "local_available": local_info.get("available", False),
+        "server_models": CURATED_SERVER_MODELS
+    }
+
+
+@app.post("/api/llm/config")
+def update_llm_config_endpoint(
+    req: LLMConfigUpdateRequest,
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    user_id = user.get("id", "user-demo-lead")
+    updated = auth_db.save_user_llm_config(
+        user_id=user_id,
+        provider=req.provider,
+        active_model=req.active_model,
+        api_key=req.api_key,
+        api_endpoint=req.api_endpoint,
+        usage_limit=req.usage_limit
+    )
+    return {
+        "success": True,
+        "message": "LLM configuration saved successfully",
+        "config": updated
+    }
+
+
+@app.get("/api/llm/local-models")
+def get_local_models_endpoint():
+    return fetch_local_ollama_models()
+
+
+@app.post("/api/llm/reset-usage")
+def reset_llm_usage_endpoint(authorization: Optional[str] = Header(None)):
+    user = verify_session(authorization)
+    user_id = user.get("id", "user-demo-lead")
+    updated = auth_db.reset_user_llm_usage(user_id)
+    return {
+        "success": True,
+        "message": "API key usage counter reset to 0",
+        "config": updated
+    }
+
+
+@app.post("/api/llm/test-connection")
+def test_llm_connection_endpoint(
+    req: LLMTestRequest,
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    user_id = user.get("id", "user-demo-lead")
+
+    api_key = req.api_key
+    if not api_key or "••" in api_key:
+        stored = auth_db.get_user_llm_config(user_id, raw_key=True)
+        api_key = stored.get("api_key", "")
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Please provide a valid API key to test connection.")
+
+    endpoint = (req.api_endpoint or "https://api.groq.com/openai/v1").rstrip("/")
+    chat_url = endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
+    active_model = req.model or "llama-3.3-70b-versatile"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "CI_Agent/1.0"
+    }
+    payload = {
+        "model": active_model,
+        "messages": [{"role": "user", "content": "Respond with 'Connection verified.'"}],
+        "max_tokens": 10
+    }
+
+    start_t = time.time()
+    try:
+        http_req = urllib.request.Request(chat_url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+        with urllib.request.urlopen(http_req, timeout=15) as resp:
+            latency = int((time.time() - start_t) * 1000)
+            data = json.loads(resp.read().decode("utf-8"))
+            reply = ""
+            if "choices" in data and len(data["choices"]) > 0:
+                reply = data["choices"][0].get("message", {}).get("content", "")
+            return {
+                "success": True,
+                "message": f"Connection verified in {latency}ms!",
+                "response_snippet": reply.strip(),
+                "latency_ms": latency
+            }
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=e.code, detail=f"API error ({e.code}): {body[:250]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
 
 
 
