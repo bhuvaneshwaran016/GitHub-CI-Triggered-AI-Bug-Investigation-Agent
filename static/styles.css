@@ -1319,6 +1319,279 @@ a:hover {
 }
 
 /* ==========================================================================
+   Dedicated Context-Aware AI Chatbot Studio Page & History Sidebar
+   ========================================================================== */
+.chatbot-studio-grid {
+  display: grid;
+  grid-template-columns: 290px 1fr;
+  gap: 24px;
+  height: calc(100vh - 190px);
+  min-height: 640px;
+}
+
+.chat-sessions-sidebar {
+  background: var(--color-cream-light);
+  border: 1px solid rgba(89, 9, 7, 0.18);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-subtle);
+}
+
+.chat-sidebar-header {
+  padding: 16px 18px;
+  background: var(--color-cream-dark);
+  border-bottom: 1px solid rgba(89, 9, 7, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.btn-sidebar-plus {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  background: var(--color-burgundy);
+  color: var(--color-cream);
+  border: none;
+  font-size: 1.2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.btn-sidebar-plus:hover {
+  background: var(--color-burgundy-light);
+  transform: scale(1.05);
+}
+
+.chat-sessions-scroll-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-session-item {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: #FFFFFF;
+  border: 1px solid rgba(89, 9, 7, 0.12);
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-session-item:hover {
+  border-color: var(--color-burgundy);
+  background: #FAF7F2;
+  transform: translateY(-1px);
+}
+
+.chat-session-item.active {
+  background: var(--color-burgundy);
+  color: var(--color-cream-light);
+  border-color: var(--color-burgundy);
+  box-shadow: 0 4px 12px rgba(89, 9, 7, 0.25);
+}
+
+.chat-session-item.active .chat-session-meta {
+  color: rgba(232, 210, 181, 0.85);
+}
+
+.chat-session-title {
+  font-weight: 600;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 20px;
+}
+
+.chat-session-meta {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.chat-session-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.chat-session-item:hover .chat-session-delete {
+  opacity: 0.7;
+}
+.chat-session-delete:hover {
+  opacity: 1 !important;
+  color: var(--color-danger);
+}
+
+.chat-sidebar-footer {
+  padding: 12px 16px;
+  background: var(--color-cream-dark);
+  border-top: 1px solid rgba(89, 9, 7, 0.12);
+}
+
+/* Chat Studio Main Panel */
+.chat-studio-main {
+  background: var(--color-cream);
+  border: 1px solid rgba(89, 9, 7, 0.18);
+  border-radius: var(--radius-xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+
+.chat-studio-header {
+  padding: 16px 24px;
+  background: var(--color-cream-dark);
+  border-bottom: 1px solid rgba(89, 9, 7, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-bot-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--color-burgundy);
+  color: var(--color-cream-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  box-shadow: 0 4px 12px rgba(89, 9, 7, 0.28);
+}
+
+.chat-studio-messages {
+  flex: 1;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.chat-sender-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+  color: var(--color-burgundy);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-bubble-user .chat-sender-tag {
+  color: var(--color-cream);
+  justify-content: flex-end;
+}
+
+.chat-source-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(89, 9, 7, 0.08);
+  color: var(--color-burgundy);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  margin-top: 8px;
+  margin-right: 6px;
+  border: 1px solid rgba(89, 9, 7, 0.15);
+}
+
+.chat-prompt-chips-bar {
+  padding: 10px 20px;
+  background: var(--color-cream-dark);
+  border-top: 1px solid rgba(89, 9, 7, 0.12);
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.chat-studio-input-container {
+  padding: 16px 24px;
+  background: var(--color-cream-light);
+  border-top: 1px solid rgba(89, 9, 7, 0.16);
+}
+
+.chat-studio-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-studio-textarea {
+  width: 100%;
+  padding: 14px 18px;
+  background: #FFFFFF;
+  border: 1px solid rgba(89, 9, 7, 0.25);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: 0.96rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 60px;
+  max-height: 200px;
+  outline: none;
+  transition: var(--transition);
+}
+
+.chat-studio-textarea:focus {
+  border-color: var(--color-burgundy);
+  box-shadow: 0 0 0 3px rgba(89, 9, 7, 0.15);
+}
+
+.chat-studio-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-typing-indicator {
+  font-size: 0.84rem;
+  color: var(--color-burgundy);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+@media (max-width: 860px) {
+  .chatbot-studio-grid {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .chat-sessions-sidebar {
+    max-height: 220px;
+  }
+  .chat-studio-messages {
+    min-height: 380px;
+  }
+}
+
+/* ==========================================================================
    CI Pipeline Stepper & Review
    ========================================================================== */
 .stepper-nav {

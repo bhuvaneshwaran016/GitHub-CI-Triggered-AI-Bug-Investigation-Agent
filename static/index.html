@@ -67,6 +67,10 @@
 
         <div id="user-profile-widget" class="user-pill" style="display: none; align-items: center; gap: 8px;">
           <span id="nav-username">Engineer</span>
+          <button id="btn-nav-chatbot" class="btn btn-sm btn-primary" title="Open AI Chatbot" style="padding: 2px 10px; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 4px;">
+            <span>🤖</span>
+            <span>Chatbot</span>
+          </button>
           <button id="btn-open-change-pw" class="btn btn-sm btn-outline" title="Change password" style="padding: 2px 8px; font-size: 0.75rem;">Password</button>
           <button id="btn-signout" class="btn btn-sm btn-outline" title="Sign out" style="padding: 2px 8px; font-size: 0.75rem;">Sign out</button>
         </div>
@@ -398,17 +402,48 @@
           </button>
         </div>
       </div>
+
+      <!-- Workspace Storage Management Action Bar on Dashboard -->
+      <div class="card card-cream" style="margin-top: 32px; padding: 18px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="width: 40px; height: 40px; border-radius: var(--radius-md); background: rgba(89, 9, 7, 0.08); display: flex; align-items: center; justify-content: center; font-size: 1.3rem;">
+            💾
+          </div>
+          <div>
+            <div style="font-weight: 700; color: var(--color-burgundy); font-size: 0.95rem;">Workspace Storage & Maintenance</div>
+            <div style="font-size: 0.82rem; color: var(--color-text-muted);">Manage downloaded repository caches and sandbox directories.</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button id="btn-dash-open-chatbot" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>🤖</span>
+            <span>AI Chatbot Studio</span>
+          </button>
+          <button id="btn-dash-remove-workspace" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; color: var(--color-burgundy); border-color: rgba(89,9,7,0.3); background: rgba(89,9,7,0.05);">
+            <span>🗑️ Remove Workspaces</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <!-- ===============================================================
          VIEW 4: PROJECT EXPLANATION PAGE
          =============================================================== -->
     <section id="view-explanation" style="display: none;">
-      <div style="margin-bottom: 24px;">
+      <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <a id="btn-back-from-explanation" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
           Back to Dashboard
         </a>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <button id="btn-goto-chatbot-top" class="btn btn-primary btn-sm" style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
+            <span style="font-size: 1.15rem;">🤖</span>
+            <span>Chatbot</span>
+          </button>
+          <button id="btn-open-remove-ws-modal" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; border-color: rgba(89,9,7,0.35); color: var(--color-burgundy); background: rgba(89,9,7,0.06);">
+            <span>🗑️ Remove Workspace</span>
+          </button>
+        </div>
       </div>
 
       <div class="card" style="margin-bottom: 32px;">
@@ -481,8 +516,26 @@
       <!-- Analysis Results View -->
       <div id="explanation-results-container" style="display: none;">
 
-        <div style="display: grid; grid-template-columns: 1fr 380px; gap: 28px; align-items: start;">
-          <!-- Left Column: 6 Deep Analysis Tabs -->
+        <!-- Results Header Banner with Dedicated Chatbot & Workspace Clean Actions -->
+        <div class="card card-cream" style="margin-bottom: 24px; padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <div style="font-size: 0.76rem; text-transform: uppercase; color: var(--color-burgundy); font-weight: 700; letter-spacing: 0.12em;">Deep Code Intelligence Complete</div>
+            <h2 id="explain-header-project-name" style="font-size: 1.6rem; margin: 2px 0 0 0;">Project Architecture & Code Analysis</h2>
+          </div>
+          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <button id="btn-open-chatbot-from-analysis" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px; font-weight: 700; padding: 10px 22px; box-shadow: var(--shadow-burgundy);">
+              <span style="font-size: 1.35rem;">🤖</span>
+              <span>Open Project Chatbot</span>
+            </button>
+            <button id="btn-open-remove-ws-from-analysis" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px;">
+              <span>🗑️</span>
+              <span>Remove Workspace</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 7 Deep Analysis Tabs (Full Width) -->
+        <div class="analysis-tabs-full-wrap">
           <div>
             <div class="tabs-nav" id="analysis-tabs">
               <button class="tab-btn active" data-tab="tab-overview">1. Overview</button>
@@ -587,31 +640,127 @@
               <div id="explain-issues-list"></div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
 
-          <!-- Right Column: Interactive Chatbot -->
-          <div>
-            <div class="chat-container">
-              <div style="background: var(--color-sage-deep); color: var(--color-cream-light); padding: 14px 18px; border-bottom: 1px solid rgba(89, 9, 7, 0.2); display: flex; align-items: center; justify-content: space-between;">
-                <div style="font-weight: 700; font-family: var(--font-serif); font-size: 1.05rem;">Project Architect Chat</div>
-                <span class="badge-demo" style="background: var(--color-burgundy); border: none; font-size: 0.7rem;">qwen2.5:3b</span>
-              </div>
+    <!-- ===============================================================
+         VIEW 4.5: DEDICATED CONTEXT-AWARE AI CHATBOT STUDIO PAGE
+         =============================================================== -->
+    <section id="view-chatbot" style="display: none;">
+      <!-- Chatbot Navigation Top Bar -->
+      <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <button id="btn-chatbot-back-to-analysis" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            Back to Project Analysis
+          </button>
+          <button id="btn-chatbot-back-to-dash" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; color: var(--color-burgundy); border-color: rgba(89,9,7,0.35);">
+            Dashboard
+          </button>
+          <span class="highlight-pill" id="chatbot-active-project-pill" style="font-family: var(--font-mono); font-size: 0.82rem; background: var(--color-cream-dark); border: 1px solid rgba(89,9,7,0.2);">
+            📁 Project: <span id="chatbot-project-name-display">Active Codebase</span>
+          </span>
+        </div>
 
-              <div id="chat-messages-list" class="chat-messages">
-                <div class="chat-bubble chat-bubble-ai">
-                  Hello! I am your Antigravity Project Architect. Ask me anything about this codebase, its architecture, execution flow, or where to add a feature.
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <button id="btn-chatbot-new-chat" class="btn btn-secondary btn-sm" style="display: inline-flex; align-items: center; gap: 6px;">
+            <span>➕</span>
+            <span>New Chat</span>
+          </button>
+          <button id="btn-chatbot-remove-workspace" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; color: var(--color-burgundy); border-color: rgba(89,9,7,0.4); background: rgba(89,9,7,0.06);">
+            <span>🗑️</span>
+            <span>Remove Workspace</span>
+          </button>
+          <button id="btn-chatbot-clear-history" class="btn btn-outline btn-sm" style="display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-muted); border-color: rgba(89,9,7,0.2);">
+            <span>🧹</span>
+            <span>Clear History</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Dedicated Two-Column Chatbot Studio Layout -->
+      <div class="chatbot-studio-grid">
+        <!-- Left Panel: Chat Sessions & SQLite History Sidebar -->
+        <div class="chat-sessions-sidebar">
+          <div class="chat-sidebar-header">
+            <div style="font-weight: 700; color: var(--color-burgundy); font-size: 0.86rem; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 6px;">
+              <span>💬</span>
+              <span>Chat History</span>
+            </div>
+            <button id="btn-sidebar-new-chat" class="btn-sidebar-plus" title="New conversation" type="button">+</button>
+          </div>
+
+          <div id="chat-sessions-list" class="chat-sessions-scroll-list">
+            <!-- Dynamic session items from SQLite -->
+            <div class="chat-session-item active">
+              <div class="chat-session-title">Current Architecture Chat</div>
+              <div class="chat-session-meta">Active • SQLite Persisted</div>
+            </div>
+          </div>
+
+          <div class="chat-sidebar-footer">
+            <div style="font-size: 0.74rem; color: var(--color-text-muted); display: flex; align-items: center; gap: 6px;">
+              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-success);"></span>
+              <span>Saved in SQLite database</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Panel: Full-Featured AI Chat Console -->
+        <div class="chat-studio-main">
+          <!-- Chat Canvas Header -->
+          <div class="chat-studio-header">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div class="chat-bot-avatar">🤖</div>
+              <div>
+                <div style="font-weight: 700; font-family: var(--font-serif); font-size: 1.25rem; color: var(--color-burgundy);">
+                  CI Project Architect Chatbot
+                </div>
+                <div style="font-size: 0.8rem; color: var(--color-text-muted);">
+                  Context-aware assistant grounded in real AST code &amp; module dependencies
                 </div>
               </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="badge-demo" style="background: var(--color-burgundy); border: none; font-size: 0.75rem;">qwen2.5:3b</span>
+              <span class="highlight-pill" style="font-size: 0.75rem; background: rgba(46, 92, 56, 0.12); color: var(--color-success); border-color: rgba(46, 92, 56, 0.3);">
+                ● AST Index Connected
+              </span>
+            </div>
+          </div>
 
-              <!-- Quick prompt chips -->
-              <div style="padding: 6px 14px; background: var(--color-cream-dark); display: flex; gap: 6px; overflow-x: auto;">
-                <span class="preset-chip" onclick="sendQuickPrompt('Explain this project in simple terms.')">Simple explanation</span>
-                <span class="preset-chip" onclick="sendQuickPrompt('What is the main execution flow?')">Execution flow</span>
-                <span class="preset-chip" onclick="sendQuickPrompt('Where should I add a new feature?')">Add a feature</span>
-              </div>
+          <!-- Message History Scroll Area -->
+          <div id="chatbot-page-messages" class="chat-studio-messages">
+            <div class="chat-bubble chat-bubble-ai">
+              <div class="chat-sender-tag">🤖 Project Architect</div>
+              Hello! I am your Antigravity Project Architect. Ask me anything about this codebase, its architecture, execution flow, or where to add a feature. Your conversations are saved in SQLite database.
+            </div>
+          </div>
 
-              <div class="chat-input-row">
-                <textarea id="chat-input-text" class="chat-textarea" placeholder="Ask about this codebase... (Enter to send, Shift+Enter for newline)"></textarea>
-                <button id="btn-chat-send" class="btn btn-primary btn-sm" style="padding: 0 16px;">Send</button>
+          <!-- Quick Suggestion Chips Carousel -->
+          <div class="chat-prompt-chips-bar">
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('Explain this project from the beginning in simple terms.')">🤖 Simple explanation</span>
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('Explain the complete execution flow from entrypoint.')">🔄 Execution flow</span>
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('Which file should I modify to add a new feature?')">✨ Add a feature</span>
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('Find potential bugs, security concerns, or edge cases.')">🔍 Find bugs</span>
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('What automated tests or CI checks should be added?')">🧪 Missing tests</span>
+            <span class="preset-chip" onclick="sendStudioQuickPrompt('How do I run and deploy this project?')">🚀 How to run & deploy</span>
+          </div>
+
+          <!-- Rich Chat Input Bar -->
+          <div class="chat-studio-input-container">
+            <div class="chat-studio-input-wrap">
+              <textarea id="chatbot-studio-input" class="chat-studio-textarea" rows="2" placeholder="Ask anything about this codebase... (Enter to send, Shift+Enter for new line)"></textarea>
+              <div class="chat-studio-actions">
+                <span id="chat-typing-status" class="chat-typing-indicator" style="display: none;">
+                  <span class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></span>
+                  <span>Formulating grounded answer...</span>
+                </span>
+                <button id="btn-chatbot-studio-send" class="btn btn-primary" type="button" style="padding: 10px 22px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
+                  <span>Send</span>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+                </button>
               </div>
             </div>
           </div>
@@ -836,6 +985,35 @@
             <span>Save New Password to SQLite</span>
           </button>
         </form>
+      </div>
+    </div>
+
+    <!-- Modal: Remove Workspace Confirmation -->
+    <div id="modal-remove-workspace" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+      <div class="card card-cream" style="width: 100%; max-width: 480px; margin: 20px; border: 2px solid var(--color-burgundy); border-radius: var(--radius-xl); padding: 32px; box-shadow: 0 25px 50px -12px rgba(89, 9, 7, 0.4);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 1.6rem;">🗑️</span>
+            <h3 style="margin: 0; color: var(--color-burgundy);">Remove Workspace</h3>
+          </div>
+          <button id="btn-close-remove-ws-modal" class="btn btn-sm btn-outline" style="border-radius: 50%; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-dark); border-color: rgba(89,9,7,0.3);">✕</button>
+        </div>
+        <p style="color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 18px; line-height: 1.5;">
+          Clean up temporary codebase clones and sandbox files from your local disk storage.
+        </p>
+
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
+          <button type="button" id="btn-confirm-remove-current-ws" class="btn btn-secondary" style="width: 100%; justify-content: center; padding: 12px; font-weight: 600;">
+            <span>🗑️ Remove Current Project Workspace</span>
+          </button>
+          <button type="button" id="btn-confirm-remove-all-ws" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 12px; font-weight: 700; background: var(--color-danger);">
+            <span>⚠️ Clean All Workspaces &amp; Sandbox Clones</span>
+          </button>
+        </div>
+
+        <div style="font-size: 0.78rem; color: var(--color-text-muted); text-align: center;">
+          * Note: This only clears local sandbox/analysis files; remote repositories are not affected.
+        </div>
       </div>
     </div>
 

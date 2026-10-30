@@ -131,3 +131,55 @@ def test_multi_turn_history_isolation():
     history_user_2 = [{"role": "user", "content": "Hello B"}, {"role": "assistant", "content": "Reply B"}]
 
     assert history_user_1[0]["content"] != history_user_2[0]["content"]
+
+
+def test_sqlite_chat_persistence_and_sessions(monkeypatch):
+    """Verifies that chat requests are persisted into SQLite and retrievable via API endpoints."""
+    monkeypatch.setattr(server.ci_backend, "query_ollama_llm", lambda prompt: "Architecture response from mock LLM.")
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Send chat question
+    res = client.post("/api/project/chat", json={
+        "message": "Explain the entry point in simple terms.",
+        "project_id": "test-sqlite-proj",
+        "context": {"project_name": "TestApp", "structure": {"files": [{"path": "main.py"}]}, "analysis": {"overview": "Sample"}}
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert "reply" in data
+    assert "session_id" in data
+    sess_id = data["session_id"]
+
+    # Verify history is stored in SQLite and returned
+    hist_res = client.get(f"/api/project/chat/history?project_id=test-sqlite-proj&session_id={sess_id}")
+    assert hist_res.status_code == 200
+    msgs = hist_res.json()["messages"]
+    assert len(msgs) >= 2
+    assert msgs[0]["role"] == "user"
+    assert "Explain the entry point" in msgs[0]["content"]
+    assert msgs[1]["role"] == "assistant"
+
+    # Verify sessions endpoint
+    sess_res = client.get("/api/project/chat/sessions?project_id=test-sqlite-proj")
+    assert sess_res.status_code == 200
+    sessions = sess_res.json()["sessions"]
+    assert any(s["id"] == sess_id for s in sessions)
+
+
+def test_workspace_clean_endpoint():
+    """Verifies that the /api/workspace/clean endpoint safely removes workspaces."""
+    from fastapi.testclient import TestClient
+    client = TestClient(server.app)
+
+    # Create dummy workspace dir
+    dummy_ws = server.ANALYSIS_WORKSPACE_DIR / "dummy-clean-proj"
+    dummy_ws.mkdir(parents=True, exist_ok=True)
+    (dummy_ws / "test.txt").write_text("sample content", encoding="utf-8")
+    assert dummy_ws.exists()
+
+    res = client.post("/api/workspace/clean", json={"project_id": "dummy-clean-proj"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert not dummy_ws.exists(), "Workspace directory should be removed"

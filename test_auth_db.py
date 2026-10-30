@@ -149,3 +149,75 @@ def test_api_auth_endpoints_end_to_end():
     })
     assert r_final.status_code == 200
 
+
+def test_sqlite_chat_message_persistence():
+    """Verifies that chat messages and sessions are stored in SQLite and can be retrieved."""
+    user_id = f"user_chat_{int(time.time()*1000)}"
+    proj_id = "test-project-alpha"
+    session_id = auth_db.create_or_get_chat_session(user_id, proj_id, title="Test Architecture Chat")
+    assert session_id.startswith("sess-")
+
+    # Save user message
+    msg1 = auth_db.save_chat_message(user_id, proj_id, session_id, role="user", content="Explain main.py please")
+    assert msg1["id"].startswith("msg-")
+    assert msg1["content"] == "Explain main.py please"
+
+    # Save assistant reply
+    msg2 = auth_db.save_chat_message(user_id, proj_id, session_id, role="assistant", content="main.py is the entrypoint.", sources=["main.py"])
+    assert msg2["sources"] == ["main.py"]
+
+    # Retrieve history
+    history = auth_db.get_chat_history(user_id, proj_id, session_id)
+    assert len(history) == 2
+    assert history[0]["role"] == "user"
+    assert history[1]["role"] == "assistant"
+
+    # Verify sessions query
+    sessions = auth_db.get_user_chat_sessions(user_id, proj_id)
+    assert len(sessions) >= 1
+    assert any(s["id"] == session_id for s in sessions)
+
+
+def test_api_chat_endpoints_and_workspace_clean(monkeypatch):
+    """Verifies REST endpoints for chat sessions, chat history, and workspace cleaning."""
+    monkeypatch.setattr(server.ci_backend, "query_ollama_llm", lambda prompt: "Architecture summary: modular microservice.")
+    email = f"chat_tester_{int(time.time()*1000)}@dev.local"
+    r_signup = client.post("/api/auth/signup", json={
+        "name": "Chat Engineer",
+        "email": email,
+        "password": "Password123",
+        "confirmPassword": "Password123"
+    })
+    token = r_signup.json()["token"]
+
+    # 1. Post a chat message
+    r_chat = client.post("/api/project/chat",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "message": "What is the architecture?",
+            "project_id": "proj-xyz",
+            "context": {"project_name": "DemoApp", "structure": {"files": []}, "analysis": {"overview": "Demo"}}
+        }
+    )
+    assert r_chat.status_code == 200
+    res_data = r_chat.json()
+    assert "reply" in res_data
+    assert "session_id" in res_data
+    session_id = res_data["session_id"]
+
+    # 2. Get chat history
+    r_hist = client.post if False else client.get(f"/api/project/chat/history?project_id=proj-xyz&session_id={session_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert r_hist.status_code == 200
+    msgs = r_hist.json()["messages"]
+    assert len(msgs) >= 2  # user message and assistant reply
+
+    # 3. Clean workspace endpoint
+    r_clean = client.post("/api/workspace/clean",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"project_id": "proj-xyz"}
+    )
+    assert r_clean.status_code == 200
+    assert r_clean.json()["status"] == "success"
+

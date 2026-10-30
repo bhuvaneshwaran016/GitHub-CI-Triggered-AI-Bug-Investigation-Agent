@@ -106,8 +106,13 @@ class AnalyzeFilesRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     project_id: Optional[str] = None
+    session_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, str]]] = []
+
+class WorkspaceCleanRequest(BaseModel):
+    project_id: Optional[str] = None
+    clean_all: Optional[bool] = False
 
 class StartRepairRequest(BaseModel):
     repo_url: str
@@ -121,7 +126,7 @@ class ApprovePushRequest(BaseModel):
 
 # --- Authentication Helpers ---
 def verify_session(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-    if authorization:
+    if authorization and isinstance(authorization, str):
         token = authorization.replace("Bearer ", "").strip()
         if token in SESSIONS:
             return SESSIONS[token]
@@ -528,7 +533,17 @@ def get_project_file(project_id: str, path: str):
 
 
 @app.post("/api/project/chat")
-def project_chat(req: ChatRequest):
+def project_chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
+    user = verify_session(authorization)
+    user_id = user.get("id", "user-demo-lead")
+    proj_id = req.project_id or (req.context.get("project_id") if req.context else None) or "default-project"
+
+    # Persistent SQLite Chat Session
+    session_id = auth_db.create_or_get_chat_session(user_id, proj_id, req.session_id)
+
+    # Store incoming user message in SQLite database
+    auth_db.save_chat_message(user_id, proj_id, session_id, role="user", content=req.message)
+
     project_data = None
     retrieval_index = None
 
@@ -551,9 +566,14 @@ def project_chat(req: ChatRequest):
 
         if missing_files and any(k in req.message.lower() for k in ["where is", "what is", "what does", "explain", "show", "how does", "tell me about"]):
             sample_files = ", ".join([f"`{f}`" for f in known_files[:8]])
+            reply_text = f"The file `{missing_files[0]}` is not present in this project. The analyzed repository contains the following files: {sample_files}. Would you like me to explain one of these files?"
+            # Store AI reply in SQLite
+            auth_db.save_chat_message(user_id, proj_id, session_id, role="assistant", content=reply_text, sources=[])
             return {
-                "reply": f"The file `{missing_files[0]}` is not present in this project. The analyzed repository contains the following files: {sample_files}. Would you like me to explain one of these files?",
-                "sources": []
+                "reply": reply_text,
+                "sources": [],
+                "session_id": session_id,
+                "project_id": proj_id
             }
 
     retrieved_code_snippets = []
@@ -582,10 +602,16 @@ def project_chat(req: ChatRequest):
             f"RELEVANT CODE CHUNKS RETRIEVED:\n{code_context_str}\n"
         )
 
-    # Format history
+    # Format history from request or SQLite
     history_str = ""
     if req.history:
         for item in req.history[-6:]:
+            role = item.get("role", "user").capitalize()
+            content = item.get("content", "")
+            history_str += f"{role}: {content}\n"
+    else:
+        past_msgs = auth_db.get_chat_history(user_id, proj_id, session_id)
+        for item in past_msgs[-6:]:
             role = item.get("role", "user").capitalize()
             content = item.get("content", "")
             history_str += f"{role}: {content}\n"
@@ -611,7 +637,157 @@ def project_chat(req: ChatRequest):
             f"Key entrypoints and modules handle validation and orchestration. You can explore individual file contents in the File Explorer tab."
         )
 
-    return {"reply": reply, "sources": [c['title'] for c in matched_chunks] if matched_chunks else []}
+    sources_list = [c['title'] for c in matched_chunks] if matched_chunks else []
+
+    # Store AI reply in SQLite
+    auth_db.save_chat_message(user_id, proj_id, session_id, role="assistant", content=reply, sources=sources_list)
+
+    return {
+        "reply": reply,
+        "sources": sources_list,
+        "session_id": session_id,
+        "project_id": proj_id
+    }
+
+
+@app.get("/api/project/chat/history")
+def get_chat_history_endpoint(
+    project_id: str = "default-project",
+    session_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    messages = auth_db.get_chat_history(user["id"], project_id, session_id)
+    return {
+        "messages": messages,
+        "project_id": project_id,
+        "session_id": session_id
+    }
+
+
+@app.get("/api/project/chat/sessions")
+def get_chat_sessions_endpoint(
+    project_id: str = "default-project",
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    sessions = auth_db.get_user_chat_sessions(user["id"], project_id)
+    return {
+        "sessions": sessions,
+        "project_id": project_id
+    }
+
+
+@app.post("/api/project/chat/new")
+def new_chat_session_endpoint(
+    req: Dict[str, Any],
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    project_id = req.get("project_id", "default-project")
+    title = req.get("title", "New Conversation")
+    new_id = f"sess-{uuid.uuid4().hex[:12]}"
+    session_id = auth_db.create_or_get_chat_session(user["id"], project_id, session_id=new_id, title=title)
+    return {
+        "session_id": session_id,
+        "project_id": project_id,
+        "title": title
+    }
+
+
+@app.delete("/api/project/chat/session/{session_id}")
+def delete_chat_session_endpoint(
+    session_id: str,
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    success = auth_db.delete_chat_session(user["id"], session_id)
+    return {"success": success, "session_id": session_id}
+
+
+@app.delete("/api/project/chat/clear")
+def clear_chat_history_endpoint(
+    project_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None)
+):
+    user = verify_session(authorization)
+    if project_id:
+        auth_db.clear_project_chat(user["id"], project_id)
+    else:
+        auth_db.clear_all_user_chats(user["id"])
+    return {"success": True, "message": "Chat history cleared successfully"}
+
+
+# ==========================================
+# Workspace Clean & Removal Endpoints
+# ==========================================
+@app.post("/api/workspace/clean")
+def clean_workspace_endpoint(
+    req: WorkspaceCleanRequest,
+    authorization: Optional[str] = Header(None)
+):
+    removed_dirs = []
+    freed_bytes = 0
+
+    if req.clean_all:
+        # 1. Clean analysis_workspace directory
+        if ANALYSIS_WORKSPACE_DIR.exists():
+            for item in list(ANALYSIS_WORKSPACE_DIR.iterdir()):
+                if item.name == "jobs_store.json":
+                    continue
+                if item.is_dir():
+                    try:
+                        for f in item.rglob("*"):
+                            if f.is_file():
+                                freed_bytes += f.stat().st_size
+                        shutil.rmtree(item, onerror=ci_backend.remove_readonly)
+                        removed_dirs.append(item.name)
+                    except Exception as e:
+                        pass
+        # 2. Clean repair sandbox workspace
+        repair_ws = BASE_DIR / "workspace"
+        if repair_ws.exists():
+            try:
+                for f in repair_ws.rglob("*"):
+                    if f.is_file():
+                        freed_bytes += f.stat().st_size
+                shutil.rmtree(repair_ws, onerror=ci_backend.remove_readonly)
+                removed_dirs.append("repair_workspace")
+            except Exception:
+                pass
+
+        ANALYSIS_CACHE.clear()
+        freed_mb = round(freed_bytes / (1024 * 1024), 2)
+        return {
+            "status": "success",
+            "message": f"Successfully cleared all workspaces ({len(removed_dirs)} directories removed). Freed {freed_mb} MB.",
+            "removed": removed_dirs,
+            "freed_bytes": freed_bytes,
+            "freed_mb": freed_mb
+        }
+    elif req.project_id:
+        target = ANALYSIS_WORKSPACE_DIR / req.project_id
+        if target.exists() and target.is_dir():
+            try:
+                for f in target.rglob("*"):
+                    if f.is_file():
+                        freed_bytes += f.stat().st_size
+                shutil.rmtree(target, onerror=ci_backend.remove_readonly)
+                removed_dirs.append(req.project_id)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to remove project workspace: {str(e)}")
+
+        ANALYSIS_CACHE.pop(req.project_id, None)
+        freed_mb = round(freed_bytes / (1024 * 1024), 2)
+        return {
+            "status": "success",
+            "message": f"Successfully removed project workspace '{req.project_id}'. Freed {freed_mb} MB.",
+            "removed": removed_dirs,
+            "freed_bytes": freed_bytes,
+            "freed_mb": freed_mb
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Must provide project_id or clean_all=true")
 
 
 

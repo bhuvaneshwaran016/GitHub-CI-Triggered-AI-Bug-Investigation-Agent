@@ -13,6 +13,7 @@
     currentView: "signin",
     activeProjectId: null,
     activeProjectData: null,
+    activeChatSessionId: null,
     activeRepairJobId: null,
     repairPollInterval: null,
     localSelectedFiles: [],
@@ -26,6 +27,7 @@
     forgot: document.getElementById("view-forgot"),
     dashboard: document.getElementById("view-dashboard"),
     explanation: document.getElementById("view-explanation"),
+    chatbot: document.getElementById("view-chatbot"),
     repair: document.getElementById("view-repair"),
   };
 
@@ -34,6 +36,7 @@
     userWidget: document.getElementById("user-profile-widget"),
     username: document.getElementById("nav-username"),
     signOutBtn: document.getElementById("btn-signout"),
+    navChatbotBtn: document.getElementById("btn-nav-chatbot"),
   };
 
   // Toast System
@@ -80,6 +83,10 @@
       nav.username.textContent = state.user.name || "Engineer";
     } else {
       nav.userWidget.style.display = "none";
+    }
+
+    if (viewName === "chatbot") {
+      initChatbotStudioPage();
     }
 
     // Trigger kinetic animation if on auth screens
@@ -859,6 +866,8 @@
   // ==========================================
   document.getElementById("btn-dashboard-explore")?.addEventListener("click", () => switchView("explanation"));
   document.getElementById("btn-dashboard-repair")?.addEventListener("click", () => switchView("repair"));
+  document.getElementById("btn-dash-open-chatbot")?.addEventListener("click", () => switchView("chatbot"));
+  document.getElementById("btn-dash-remove-workspace")?.addEventListener("click", openRemoveWorkspaceModal);
   document.getElementById("btn-back-from-explanation")?.addEventListener("click", () => switchView("dashboard"));
   document.getElementById("btn-back-from-repair")?.addEventListener("click", () => switchView("dashboard"));
   document.getElementById("nav-brand")?.addEventListener("click", (e) => {
@@ -1246,71 +1255,426 @@
     });
   });
 
-  // Chatbot Logic
-  const chatMessages = document.getElementById("chat-messages-list");
-  const chatInput = document.getElementById("chat-input-text");
-  const btnChatSend = document.getElementById("btn-chat-send");
+  // ==========================================
+  // Dedicated Context-Aware AI Chatbot Studio Page & SQLite Message Storage
+  // ==========================================
+  const studioMessages = document.getElementById("chatbot-page-messages");
+  const studioInput = document.getElementById("chatbot-studio-input");
+  const btnStudioSend = document.getElementById("btn-chatbot-studio-send");
+  const studioTypingStatus = document.getElementById("chat-typing-status");
+  const studioSessionsList = document.getElementById("chat-sessions-list");
 
-  window.sendQuickPrompt = function (text) {
-    if (chatInput) {
-      chatInput.value = text;
-      sendChatMessage();
+  // Navigation Buttons to Dedicated Chatbot Page
+  document.getElementById("btn-goto-chatbot-top")?.addEventListener("click", () => switchView("chatbot"));
+  document.getElementById("btn-open-chatbot-from-analysis")?.addEventListener("click", () => switchView("chatbot"));
+  document.getElementById("btn-nav-chatbot")?.addEventListener("click", () => switchView("chatbot"));
+  document.getElementById("btn-chatbot-back-to-analysis")?.addEventListener("click", () => switchView("explanation"));
+  document.getElementById("btn-chatbot-back-to-dash")?.addEventListener("click", () => switchView("dashboard"));
+
+  window.sendStudioQuickPrompt = function (text) {
+    if (studioInput) {
+      studioInput.value = text;
+      sendStudioChatMessage();
     }
   };
 
-  async function sendChatMessage() {
-    const msg = chatInput.value.trim();
+  async function initChatbotStudioPage() {
+    const projName = state.activeProjectData?.project_name || state.activeProjectId || "Active Codebase";
+    const projDisplay = document.getElementById("chatbot-project-name-display");
+    if (projDisplay) projDisplay.textContent = projName;
+
+    await loadStudioChatSessions();
+    await loadStudioChatHistory(state.activeChatSessionId);
+  }
+
+  async function loadStudioChatSessions() {
+    if (!studioSessionsList) return;
+    const projId = state.activeProjectId || "default-project";
+
+    try {
+      const res = await fetch(`/api/project/chat/sessions?project_id=${encodeURIComponent(projId)}`, {
+        headers: { "Authorization": `Bearer ${state.token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const sessions = data.sessions || [];
+
+      if (sessions.length === 0) {
+        studioSessionsList.innerHTML = `
+          <div style="padding: 16px; font-size: 0.82rem; color: var(--color-text-muted); text-align: center;">
+            No past conversations.<br>Ask a question below to start!
+          </div>
+        `;
+        return;
+      }
+
+      studioSessionsList.innerHTML = "";
+      sessions.forEach((s) => {
+        const item = document.createElement("div");
+        const isActive = s.id === state.activeChatSessionId;
+        item.className = `chat-session-item ${isActive ? "active" : ""}`;
+        item.innerHTML = `
+          <div class="chat-session-title">${escapeHtml(s.title || "Architecture Chat")}</div>
+          <div class="chat-session-meta">${s.message_count || 0} messages • ${formatDate(s.updated_at)}</div>
+          <button class="chat-session-delete" title="Delete conversation" type="button">✕</button>
+        `;
+
+        item.addEventListener("click", (e) => {
+          if (e.target.classList.contains("chat-session-delete")) return;
+          state.activeChatSessionId = s.id;
+          document.querySelectorAll(".chat-session-item").forEach(el => el.classList.remove("active"));
+          item.classList.add("active");
+          loadStudioChatHistory(s.id);
+        });
+
+        const delBtn = item.querySelector(".chat-session-delete");
+        delBtn?.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (confirm("Delete this conversation session?")) {
+            await deleteChatSession(s.id);
+          }
+        });
+
+        studioSessionsList.appendChild(item);
+      });
+    } catch (err) {
+      console.warn("Could not load chat sessions:", err);
+    }
+  }
+
+  async function loadStudioChatHistory(sessionId) {
+    if (!studioMessages) return;
+    const projId = state.activeProjectId || "default-project";
+    studioMessages.innerHTML = "";
+
+    try {
+      const url = `/api/project/chat/history?project_id=${encodeURIComponent(projId)}${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`;
+      const res = await fetch(url, {
+        headers: { "Authorization": `Bearer ${state.token}` }
+      });
+      const data = await res.json();
+      const messages = data.messages || [];
+
+      if (messages.length === 0) {
+        studioMessages.innerHTML = `
+          <div class="chat-bubble chat-bubble-ai">
+            <div class="chat-sender-tag">🤖 Project Architect</div>
+            Hello! I am your Antigravity Project Architect. Ask me anything about this codebase, its architecture, execution flow, or where to add a feature. Your questions and answers are stored securely in the SQLite database.
+          </div>
+        `;
+        return;
+      }
+
+      messages.forEach((m) => {
+        const bubble = document.createElement("div");
+        if (m.role === "user") {
+          bubble.className = "chat-bubble chat-bubble-user";
+          bubble.innerHTML = `
+            <div class="chat-sender-tag">YOU • ${formatDate(m.created_at)}</div>
+            <div>${escapeHtml(m.content)}</div>
+          `;
+        } else {
+          bubble.className = "chat-bubble chat-bubble-ai";
+          const formatted = formatChatMessageContent(m.content);
+          let sourcesHtml = "";
+          if (m.sources && m.sources.length) {
+            sourcesHtml = `<div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px;">
+              ${m.sources.map(s => `<span class="chat-source-badge">📄 ${escapeHtml(s)}</span>`).join("")}
+            </div>`;
+          }
+          bubble.innerHTML = `
+            <div class="chat-sender-tag">🤖 Project Architect • ${formatDate(m.created_at)}</div>
+            <div>${formatted}</div>
+            ${sourcesHtml}
+          `;
+        }
+        studioMessages.appendChild(bubble);
+      });
+
+      studioMessages.scrollTop = studioMessages.scrollHeight;
+    } catch (err) {
+      studioMessages.innerHTML = `<div style="color:var(--color-danger); padding:16px;">Failed to load chat history: ${err.message}</div>`;
+    }
+  }
+
+  async function sendStudioChatMessage() {
+    if (!studioInput) return;
+    const msg = studioInput.value.trim();
     if (!msg) return;
 
-    // Append User Message
+    const projId = state.activeProjectId || "default-project";
+
+    // 1. Render User Message Immediately
     const userBubble = document.createElement("div");
     userBubble.className = "chat-bubble chat-bubble-user";
-    userBubble.textContent = msg;
-    chatMessages.appendChild(userBubble);
-    chatInput.value = "";
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    userBubble.innerHTML = `
+      <div class="chat-sender-tag">YOU • Just now</div>
+      <div>${escapeHtml(msg)}</div>
+    `;
+    studioMessages.appendChild(userBubble);
+    studioInput.value = "";
+    studioMessages.scrollTop = studioMessages.scrollHeight;
 
-    // Append AI Loading Bubble
-    const aiBubble = document.createElement("div");
-    aiBubble.className = "chat-bubble chat-bubble-ai";
-    aiBubble.innerHTML = `<span class="spinner" style="border-top-color:var(--color-burgundy);"></span> Thinking...`;
-    chatMessages.appendChild(aiBubble);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+    // 2. Show Typing Indicator
+    if (studioTypingStatus) studioTypingStatus.style.display = "flex";
+    btnStudioSend && (btnStudioSend.disabled = true);
 
     try {
       const res = await fetch("/api/project/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
         body: JSON.stringify({
           message: msg,
-          project_id: state.activeProjectId,
+          project_id: projId,
+          session_id: state.activeChatSessionId,
           context: state.activeProjectData,
           history: state.chatHistory,
         }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Chat request failed");
 
-      // Render reply with simple code blocks
-      const formatted = escapeHtml(data.reply).replace(/```(?:python|javascript|bash)?([\s\S]*?)```/g, '<pre class="code-block" style="margin:8px 0; padding:10px;"><code>$1</code></pre>');
-      aiBubble.innerHTML = formatted;
+      // Update session ID if generated
+      if (data.session_id) {
+        state.activeChatSessionId = data.session_id;
+      }
+
+      // Render AI Assistant Bubble
+      const aiBubble = document.createElement("div");
+      aiBubble.className = "chat-bubble chat-bubble-ai";
+      const formatted = formatChatMessageContent(data.reply);
+      let sourcesHtml = "";
+      if (data.sources && data.sources.length) {
+        sourcesHtml = `<div style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px;">
+          ${data.sources.map(s => `<span class="chat-source-badge">📄 ${escapeHtml(s)}</span>`).join("")}
+        </div>`;
+      }
+      aiBubble.innerHTML = `
+        <div class="chat-sender-tag">🤖 Project Architect • Just now</div>
+        <div>${formatted}</div>
+        ${sourcesHtml}
+      `;
+      studioMessages.appendChild(aiBubble);
 
       state.chatHistory.push({ role: "user", content: msg });
       state.chatHistory.push({ role: "assistant", content: data.reply });
+
+      // Refresh session titles in sidebar
+      await loadStudioChatSessions();
     } catch (err) {
-      aiBubble.innerHTML = `<span style="color:var(--color-danger);">Error: Could not retrieve answer. Please verify Ollama is running.</span>`;
+      const errBubble = document.createElement("div");
+      errBubble.className = "chat-bubble chat-bubble-ai";
+      errBubble.innerHTML = `<span style="color:var(--color-danger); font-weight:600;">⚠️ Could not get answer: ${escapeHtml(err.message)}</span>`;
+      studioMessages.appendChild(errBubble);
+    } finally {
+      if (studioTypingStatus) studioTypingStatus.style.display = "none";
+      btnStudioSend && (btnStudioSend.disabled = false);
+      studioMessages.scrollTop = studioMessages.scrollHeight;
     }
-    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  btnChatSend?.addEventListener("click", sendChatMessage);
-  chatInput?.addEventListener("keydown", (e) => {
+  btnStudioSend?.addEventListener("click", sendStudioChatMessage);
+  studioInput?.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendChatMessage();
+      sendStudioChatMessage();
+    }
+  });
+
+  // New Chat Sessions
+  const btnNewChat = document.getElementById("btn-chatbot-new-chat");
+  const btnSidebarNewChat = document.getElementById("btn-sidebar-new-chat");
+  [btnNewChat, btnSidebarNewChat].forEach((btn) => {
+    btn?.addEventListener("click", async () => {
+      const projId = state.activeProjectId || "default-project";
+      try {
+        const res = await fetch("/api/project/chat/new", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${state.token}`
+          },
+          body: JSON.stringify({ project_id: projId, title: "New Conversation" }),
+        });
+        const data = await res.json();
+        state.activeChatSessionId = data.session_id;
+        state.chatHistory = [];
+        showToast("Started fresh conversation session", "info");
+        await loadStudioChatSessions();
+        await loadStudioChatHistory(data.session_id);
+      } catch (err) {
+        showToast("Could not create new session", "error");
+      }
+    });
+  });
+
+  // Clear Chat History
+  document.getElementById("btn-chatbot-clear-history")?.addEventListener("click", async () => {
+    if (!confirm("Are you sure you want to clear all chat history for this project from SQLite database?")) return;
+    const projId = state.activeProjectId || "default-project";
+    try {
+      const res = await fetch(`/api/project/chat/clear?project_id=${encodeURIComponent(projId)}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${state.token}` },
+      });
+      if (res.ok) {
+        state.activeChatSessionId = null;
+        state.chatHistory = [];
+        showToast("Chat history cleared from SQLite", "success");
+        await loadStudioChatSessions();
+        await loadStudioChatHistory(null);
+      }
+    } catch (err) {
+      showToast("Failed to clear chat history", "error");
+    }
+  });
+
+  async function deleteChatSession(sessionId) {
+    try {
+      const res = await fetch(`/api/project/chat/session/${encodeURIComponent(sessionId)}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${state.token}` },
+      });
+      if (res.ok) {
+        if (state.activeChatSessionId === sessionId) {
+          state.activeChatSessionId = null;
+        }
+        showToast("Session deleted from SQLite", "info");
+        await loadStudioChatSessions();
+        await loadStudioChatHistory(state.activeChatSessionId);
+      }
+    } catch (err) {
+      showToast("Failed to delete session", "error");
+    }
+  }
+
+  function formatChatMessageContent(text) {
+    if (!text) return "";
+    let safe = escapeHtml(text);
+    // Replace fenced code blocks with formatted code snippet
+    safe = safe.replace(/```(?:python|javascript|bash|json|sh|html|css)?\s*([\s\S]*?)```/g, function (match, code) {
+      return `<pre class="code-block" style="margin: 12px 0; padding: 14px; position: relative;"><code>${code}</code></pre>`;
+    });
+    // Replace inline backtick code
+    safe = safe.replace(/`([^`]+)`/g, '<code style="background:rgba(89,9,7,0.08); padding:2px 5px; border-radius:4px; font-family:var(--font-mono); font-size:0.86rem; color:var(--color-burgundy);">$1</code>');
+    // Replace newlines with <br>
+    return safe.replace(/\n/g, "<br>");
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return "Recent";
+    try {
+      const d = new Date(dateStr.replace(" ", "T"));
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return dateStr;
+    }
+  }
+
+  // ==========================================
+  // Workspace Clean & Removal Modal Handlers
+  // ==========================================
+  const modalRemoveWs = document.getElementById("modal-remove-workspace");
+  const btnCloseRemoveWs = document.getElementById("btn-close-remove-ws-modal");
+  const btnConfirmRemoveCurrent = document.getElementById("btn-confirm-remove-current-ws");
+  const btnConfirmRemoveAll = document.getElementById("btn-confirm-remove-all-ws");
+
+  function openRemoveWorkspaceModal() {
+    if (modalRemoveWs) modalRemoveWs.style.display = "flex";
+  }
+
+  function closeRemoveWorkspaceModal() {
+    if (modalRemoveWs) modalRemoveWs.style.display = "none";
+  }
+
+  document.getElementById("btn-open-remove-ws-modal")?.addEventListener("click", openRemoveWorkspaceModal);
+  document.getElementById("btn-open-remove-ws-from-analysis")?.addEventListener("click", openRemoveWorkspaceModal);
+  document.getElementById("btn-chatbot-remove-workspace")?.addEventListener("click", openRemoveWorkspaceModal);
+  btnCloseRemoveWs?.addEventListener("click", closeRemoveWorkspaceModal);
+
+  modalRemoveWs?.addEventListener("click", (e) => {
+    if (e.target === modalRemoveWs) closeRemoveWorkspaceModal();
+  });
+
+  // Remove Current Project Workspace
+  btnConfirmRemoveCurrent?.addEventListener("click", async () => {
+    const projId = state.activeProjectId;
+    if (!projId) {
+      showToast("No active project workspace currently selected", "info");
+      closeRemoveWorkspaceModal();
+      return;
+    }
+
+    btnConfirmRemoveCurrent.disabled = true;
+    btnConfirmRemoveCurrent.innerHTML = `<span class="spinner"></span> Removing project workspace...`;
+
+    try {
+      const res = await fetch("/api/workspace/clean", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ project_id: projId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to remove workspace");
+
+      showToast(data.message, "success");
+      closeRemoveWorkspaceModal();
+      state.activeProjectId = null;
+      state.activeProjectData = null;
+      const resultsCont = document.getElementById("explanation-results-container");
+      if (resultsCont) resultsCont.style.display = "none";
+      switchView("explanation");
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      btnConfirmRemoveCurrent.disabled = false;
+      btnConfirmRemoveCurrent.innerHTML = `<span>🗑️ Remove Current Project Workspace</span>`;
+    }
+  });
+
+  // Remove All Workspaces
+  btnConfirmRemoveAll?.addEventListener("click", async () => {
+    if (!confirm("Are you sure you want to clean and remove ALL workspaces and temporary clones from disk?")) return;
+
+    btnConfirmRemoveAll.disabled = true;
+    btnConfirmRemoveAll.innerHTML = `<span class="spinner"></span> Cleaning all workspaces...`;
+
+    try {
+      const res = await fetch("/api/workspace/clean", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ clean_all: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to clean all workspaces");
+
+      showToast(data.message, "success");
+      closeRemoveWorkspaceModal();
+      state.activeProjectId = null;
+      state.activeProjectData = null;
+      const resultsCont = document.getElementById("explanation-results-container");
+      if (resultsCont) resultsCont.style.display = "none";
+      switchView("dashboard");
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      btnConfirmRemoveAll.disabled = false;
+      btnConfirmRemoveAll.innerHTML = `<span>⚠️ Clean All Workspaces & Sandbox Clones</span>`;
     }
   });
 
   function escapeHtml(text) {
+    if (!text) return "";
     return text.replace(/[&<>"']/g, function (m) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m];
     });

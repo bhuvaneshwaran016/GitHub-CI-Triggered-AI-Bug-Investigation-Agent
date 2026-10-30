@@ -6,13 +6,14 @@ No plaintext passwords are ever persisted or exposed.
 """
 
 import hashlib
+import json
 import os
 import secrets
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 DB_PATH = Path(__file__).resolve().parent / "users.db"
 
@@ -24,7 +25,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db():
-    """Initializes SQLite schema and creates the users table if not exists."""
+    """Initializes SQLite schema and creates the users, chat_sessions, and chat_messages tables if not exists."""
     with get_db_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -40,6 +41,33 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token);")
+
+        # Chat Sessions & Messages Tables for Persistent SQLite Chat History
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id, project_id);")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                sources_json TEXT,
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id, created_at);")
         conn.commit()
 
         # Seed default engineer account if empty
@@ -219,6 +247,168 @@ def change_user_password(user_id: str, old_password: str, new_password: str) -> 
             SET password_hash = ?, updated_at = ?
             WHERE id = ?
         """, (new_hash, now_str, user_id))
+        conn.commit()
+        return True
+
+
+# ==========================================================================
+# Chat Sessions & Persistent History Storage
+# ==========================================================================
+def create_or_get_chat_session(user_id: str, project_id: str, session_id: Optional[str] = None, title: Optional[str] = None) -> str:
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        if session_id:
+            cursor.execute("SELECT id FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+            row = cursor.fetchone()
+            if row:
+                return row["id"]
+
+        new_session_id = session_id or f"sess-{uuid.uuid4().hex[:12]}"
+        sess_title = title or "New Architecture Chat"
+        cursor.execute("""
+            INSERT OR IGNORE INTO chat_sessions (id, user_id, project_id, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (new_session_id, user_id, project_id, sess_title, now_str, now_str))
+        conn.commit()
+        return new_session_id
+
+
+def save_chat_message(user_id: str, project_id: str, session_id: str, role: str, content: str, sources: Optional[List[str]] = None) -> Dict[str, Any]:
+    sess_id = create_or_get_chat_session(user_id, project_id, session_id)
+    msg_id = f"msg-{uuid.uuid4().hex[:12]}"
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    sources_json = json.dumps(sources or [])
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_messages (id, session_id, user_id, project_id, role, content, sources_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (msg_id, sess_id, user_id, project_id, role, content, sources_json, now_str))
+
+        # Update session title if user message and first message
+        if role == "user":
+            cursor.execute("SELECT COUNT(*) FROM chat_messages WHERE session_id = ?", (sess_id,))
+            msg_count = cursor.fetchone()[0]
+            if msg_count <= 2:
+                cleaned_title = content.strip().split("\n")[0][:45]
+                cursor.execute("""
+                    UPDATE chat_sessions
+                    SET title = ?, updated_at = ?
+                    WHERE id = ? AND (title = 'New Architecture Chat' OR title = 'New Conversation')
+                """, (cleaned_title, now_str, sess_id))
+            else:
+                cursor.execute("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", (now_str, sess_id))
+        else:
+            cursor.execute("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", (now_str, sess_id))
+
+        conn.commit()
+
+    return {
+        "id": msg_id,
+        "session_id": sess_id,
+        "user_id": user_id,
+        "project_id": project_id,
+        "role": role,
+        "content": content,
+        "sources": sources or [],
+        "created_at": now_str,
+    }
+
+
+def get_chat_history(user_id: str, project_id: str, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        if session_id:
+            cursor.execute("""
+                SELECT id, session_id, user_id, project_id, role, content, sources_json, created_at
+                FROM chat_messages
+                WHERE user_id = ? AND session_id = ?
+                ORDER BY rowid ASC
+            """, (user_id, session_id))
+        else:
+            cursor.execute("""
+                SELECT id FROM chat_sessions
+                WHERE user_id = ? AND project_id = ?
+                ORDER BY updated_at DESC LIMIT 1
+            """, (user_id, project_id))
+            row = cursor.fetchone()
+            if not row:
+                return []
+            latest_sess = row["id"]
+            cursor.execute("""
+                SELECT id, session_id, user_id, project_id, role, content, sources_json, created_at
+                FROM chat_messages
+                WHERE user_id = ? AND session_id = ?
+                ORDER BY rowid ASC
+            """, (user_id, latest_sess))
+
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            sources = []
+            if r["sources_json"]:
+                try:
+                    sources = json.loads(r["sources_json"])
+                except Exception:
+                    pass
+            result.append({
+                "id": r["id"],
+                "session_id": r["session_id"],
+                "user_id": r["user_id"],
+                "project_id": r["project_id"],
+                "role": r["role"],
+                "content": r["content"],
+                "sources": sources,
+                "created_at": r["created_at"],
+            })
+        return result
+
+
+def get_user_chat_sessions(user_id: str, project_id: str) -> List[Dict[str, Any]]:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.id, s.title, s.created_at, s.updated_at,
+                   COUNT(m.id) as message_count
+            FROM chat_sessions s
+            LEFT JOIN chat_messages m ON s.id = m.session_id
+            WHERE s.user_id = ? AND s.project_id = ?
+            GROUP BY s.id
+            ORDER BY s.updated_at DESC
+        """, (user_id, project_id))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_chat_session(user_id: str, session_id: str) -> bool:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM chat_messages WHERE user_id = ? AND session_id = ?", (user_id, session_id))
+        cursor.execute("DELETE FROM chat_sessions WHERE user_id = ? AND id = ?", (user_id, session_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def clear_project_chat(user_id: str, project_id: str) -> bool:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM chat_messages WHERE user_id = ? AND project_id = ?", (user_id, project_id))
+        cursor.execute("DELETE FROM chat_sessions WHERE user_id = ? AND project_id = ?", (user_id, project_id))
+        conn.commit()
+        return True
+
+
+def clear_all_user_chats(user_id: Optional[str] = None) -> bool:
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        if user_id:
+            cursor.execute("DELETE FROM chat_messages WHERE user_id = ?", (user_id,))
+            cursor.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))
+        else:
+            cursor.execute("DELETE FROM chat_messages")
+            cursor.execute("DELETE FROM chat_sessions")
         conn.commit()
         return True
 
