@@ -18,8 +18,8 @@ import requests
 BASE_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = BASE_DIR / "workspace"
 TARGET_REPO_DEFAULT = "https://github.com/bhuvaneshwaran016/taskflow_ci_agent_test"
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "qwen2.5:3b"
+OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b")
 
 # ANSI Colors for Terminal Presentation
 CYAN = "\033[96m"

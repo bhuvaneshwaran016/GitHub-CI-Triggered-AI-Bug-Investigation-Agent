@@ -267,7 +267,7 @@ def query_llm_for_user(user_id: Optional[str], prompt: str) -> Tuple[str, Dict[s
                 "usage_limit": usage_limit
             }
 
-        api_key = config.get("api_key", "").strip()
+        api_key = config.get("api_key", "").strip() or os.environ.get("GROQ_API_KEY", "").strip() or os.environ.get("OPENAI_API_KEY", "").strip()
         if not api_key:
             return (
                 "⚠️ [API Key Required] You have selected a Cloud Server model, but no API key is configured. "
@@ -1324,4 +1324,13 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    # Default to 127.0.0.1 on local machines so Windows browsers open with one click,
+    # while honoring HOST=0.0.0.0 in Docker and Cloud hosting environments.
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", 8000))
+    reload = os.environ.get("RELOAD", "false").lower() in ("true", "1")
+    print("\n" + "=" * 65)
+    print("  CI_Agent Web Application Running Successfully!")
+    print(f"  Open in browser: http://127.0.0.1:{port} or http://localhost:{port}")
+    print("=" * 65 + "\n")
+    uvicorn.run("server:app", host=host, port=port, reload=reload)
