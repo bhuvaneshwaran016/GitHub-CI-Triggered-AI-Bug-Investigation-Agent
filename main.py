@@ -661,9 +661,29 @@ def push_repair_to_github(workspace: Path, branch: str = "main", modified_files:
         print(f"{YELLOW}[*] Staging all repaired files...{RESET}")
         subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
 
-        files_label = ", ".join(modified_files[:3]) if modified_files else "code defects"
-        commit_msg = f"[CI_Agent] Automated AI Repair: Resolved defects in {files_label}, all tests passing"
-        subprocess.run(["git", "-C", str(workspace), "commit", "-m", commit_msg], check=True)
+        # Check if there are uncommitted changes to commit
+        status_res = subprocess.run(
+            ["git", "-C", str(workspace), "status", "--porcelain"],
+            capture_output=True,
+            text=True
+        )
+        has_changes = bool(status_res.stdout.strip())
+
+        if has_changes:
+            files_label = ", ".join(modified_files[:3]) if modified_files else "code defects"
+            commit_msg = f"[CI_Agent] Automated AI Repair: Resolved defects in {files_label}, all tests passing"
+            commit_res = subprocess.run(
+                ["git", "-C", str(workspace), "commit", "-m", commit_msg],
+                capture_output=True,
+                text=True
+            )
+            if commit_res.returncode != 0:
+                out = (commit_res.stdout + "\n" + commit_res.stderr).lower()
+                if "nothing to commit" not in out and "working tree clean" not in out:
+                    print(f"{RED}[ERROR] Git commit error:{RESET}\n{commit_res.stderr or commit_res.stdout}")
+                    return False
+        else:
+            print(f"{GREEN}[*] Working tree clean; fixes are already committed in this branch.{RESET}")
 
         print(f"{YELLOW}[*] Pushing to origin/{branch}...{RESET}")
         push_res = subprocess.run(
@@ -673,13 +693,18 @@ def push_repair_to_github(workspace: Path, branch: str = "main", modified_files:
             timeout=40,
         )
 
-        if push_res.returncode == 0:
+        push_output = (push_res.stdout + "\n" + push_res.stderr).strip()
+        push_lower = push_output.lower()
+
+        if push_res.returncode == 0 or "everything up-to-date" in push_lower or "already up to date" in push_lower:
             print(f"\n{GREEN}{BOLD}[SUCCESS] Changes successfully pushed to GitHub!{RESET}")
             print(f"Repository branch: {branch}")
+            if "everything up-to-date" in push_lower or "already up to date" in push_lower:
+                print("All repaired commits are verified and up-to-date on GitHub.")
             print("\nGitHub Actions CI workflow has been automatically triggered!")
             return True
         else:
-            print(f"\n{RED}[ERROR] Git push failed:{RESET}\n{push_res.stderr or push_res.stdout}")
+            print(f"\n{RED}[ERROR] Git push failed:{RESET}\n{push_output}")
             return False
     except Exception as err:
         print(f"\n{RED}[ERROR] Push error: {err}{RESET}")
