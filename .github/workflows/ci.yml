@@ -36,3 +36,4 @@ jobs:
         run: |
           echo "Running unit and integration tests..."
           pytest test_auth_db.py test_project_explanation.py -v
+
