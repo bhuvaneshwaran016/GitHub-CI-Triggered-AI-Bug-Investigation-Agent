@@ -1325,12 +1325,13 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 if __name__ == "__main__":
     import uvicorn
     # Default to 127.0.0.1 on local machines so Windows browsers open with one click,
-    # while honoring HOST=0.0.0.0 in Docker and Cloud hosting environments.
-    host = os.environ.get("HOST", "127.0.0.1")
+    # while auto-binding to 0.0.0.0 in Cloud (Render/Railway/Heroku/Docker) where PORT is set.
+    default_host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+    host = os.environ.get("HOST", default_host)
     port = int(os.environ.get("PORT", 8000))
     reload = os.environ.get("RELOAD", "false").lower() in ("true", "1")
     print("\n" + "=" * 65)
     print("  CI_Agent Web Application Running Successfully!")
-    print(f"  Open in browser: http://127.0.0.1:{port} or http://localhost:{port}")
+    print(f"  Open in browser: http://localhost:{port} or http://127.0.0.1:{port}")
     print("=" * 65 + "\n")
     uvicorn.run("server:app", host=host, port=port, reload=reload)
