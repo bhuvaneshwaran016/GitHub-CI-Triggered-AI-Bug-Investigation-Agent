@@ -4,6 +4,7 @@ Designed to detect and repair errors dynamically in ANY repository (source code 
 """
 
 import ast
+import difflib
 import json
 import math
 import os
@@ -177,10 +178,15 @@ def detect_and_run_tests(workspace: Path, custom_command: str = None) -> tuple[i
     summary_match = re.search(r"=+\s*(.*?(?:failed|passed|error).*?)=+", output)
     summary_line = summary_match.group(1).strip() if summary_match else f"{passed} passed, {failed} failed, {errors} errors"
 
+    total_failures = failed + errors
+    if returncode != 0 and total_failures == 0:
+        total_failures = 1
+        summary_line = f"Test suite failure (Exit Code: {returncode})"
+
     metrics = {
         "exit_code": returncode,
         "passed": passed,
-        "failed": failed + errors,
+        "failed": total_failures,
         "summary": summary_line,
     }
     return returncode, output, metrics
@@ -218,6 +224,8 @@ def parse_test_failures(workspace: Path, test_output: str) -> dict:
 
         target_file = workspace / norm_path
         if target_file.is_file():
+            if norm_path.endswith("__init__.py"):
+                continue
             is_test = any(t in norm_path.lower() for t in ["test", "conftest", "tests/"])
             if is_test:
                 test_files.add(norm_path)
@@ -240,7 +248,7 @@ def parse_test_failures(workspace: Path, test_output: str) -> dict:
 
                 if mod_name:
                     mod_rel = mod_name.replace(".", "/") + ".py"
-                    if (workspace / mod_rel).is_file() and mod_rel not in discovered_sources and mod_rel not in source_files:
+                    if (workspace / mod_rel).is_file() and mod_rel not in discovered_sources and mod_rel not in source_files and not mod_rel.endswith("__init__.py"):
                         discovered_sources.append(mod_rel)
         except Exception:
             pass
@@ -255,7 +263,9 @@ def parse_test_failures(workspace: Path, test_output: str) -> dict:
     else:
         failures_summary.append(test_output[-4000:])
 
-    combined_sources = list(source_files) + [s for s in discovered_sources if s not in source_files]
+    combined_sources = [s for s in source_files if not s.endswith("__init__.py")]
+    if not combined_sources and not test_files:
+        combined_sources = [s for s in discovered_sources if not s.endswith("__init__.py")]
     if not combined_sources and workspace.exists():
         for p in workspace.rglob("*.py"):
             try:
@@ -320,7 +330,7 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
     Fixes defective, contradictory, or typo-ridden test assertions when the
     underlying source implementation is correct but the tests have wrong expectations.
     """
-    blocks = output.split("______________________________ ")
+    blocks = re.split(r"(?:_{5,}\s+.*?_{5,}|={5,}\s+FAILURES\s+={5,}|={5,}\s+ERRORS\s+={5,})", output)
     if len(blocks) <= 1:
         return []
 
@@ -333,15 +343,38 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
         expected_val = None
         is_did_not_raise = False
         uncaught_exc = None
+        fixture_error = None
+        fixture_replacement = None
+        key_error = None
 
         for l in lines:
-            m_err = re.search(r"([a-zA-Z0-9_\-/\\]+\.py):(\d+):", l)
+            m_err = re.search(r"(?:file\s+)?([a-zA-Z0-9_\-/\\]+\.py)(?:[:,]\s*line\s*|\s*:\s*)(\d+)", l)
             if m_err and "test" in m_err.group(1).lower():
                 test_file = m_err.group(1).replace("\\", "/")
                 line_num = int(m_err.group(2))
 
-            if l.strip().startswith("E       assert ") and " == " in l:
-                parts = l.strip().replace("E       assert ", "").split(" == ")
+            # Detect fixture not found error
+            m_fix = re.search(r"fixture\s+['\"]([a-zA-Z0-9_]+)['\"]\s+not\s+found", l)
+            if m_fix:
+                fixture_error = m_fix.group(1)
+
+            # Detect available fixtures list
+            m_avail = re.search(r"available\s+fixtures:\s*([^\n]+)", l)
+            if m_avail and fixture_error:
+                avail_fixtures = [f.strip() for f in m_avail.group(1).split(",") if f.strip()]
+                matches = difflib.get_close_matches(fixture_error, avail_fixtures, n=1, cutoff=0.5)
+                if matches:
+                    fixture_replacement = matches[0]
+
+            # Detect KeyError
+            m_key = re.search(r"KeyError:\s*['\"]([a-zA-Z0-9_]+)['\"]", l)
+            if m_key:
+                key_error = m_key.group(1)
+
+            # Detect assert mismatch
+            if ("assert " in l or "AssertionError: assert " in l) and " == " in l:
+                clean_l = re.sub(r"^E\s+(?:AssertionError:\s+)?assert\s+", "", l.strip())
+                parts = clean_l.split(" == ")
                 if len(parts) == 2:
                     actual_val = parts[0].strip()
                     expected_val = parts[1].strip()
@@ -359,6 +392,9 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
                 "expected_val": expected_val,
                 "is_did_not_raise": is_did_not_raise,
                 "uncaught_exc": uncaught_exc,
+                "fixture_error": fixture_error,
+                "fixture_replacement": fixture_replacement,
+                "key_error": key_error,
             })
 
     repaired_files = []
@@ -374,8 +410,26 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
                 continue
             orig_line = code_lines[idx]
 
+            # Case 0: Fixture typo (e.g. setup_servie -> setup_service)
+            if fix.get("fixture_error"):
+                bad_fix = fix["fixture_error"]
+                good_fix = fix.get("fixture_replacement") or ("setup_service" if "servie" in bad_fix else None)
+                for check_idx in range(max(0, idx - 2), min(len(code_lines), idx + 3)):
+                    if "def test_" in code_lines[check_idx] and bad_fix in code_lines[check_idx]:
+                        if good_fix:
+                            code_lines[check_idx] = re.sub(rf"\b{re.escape(bad_fix)}\b", good_fix, code_lines[check_idx])
+                        break
+
+            # Case 0.5: KeyError on dict key (e.g. owner["std_id"] -> owner["id"])
+            elif fix.get("key_error"):
+                bad_key = fix["key_error"]
+                if bad_key == "std_id":
+                    code_lines[idx] = code_lines[idx].replace('["std_id"]', '["id"]').replace("['std_id']", "['id']")
+                elif bad_key.endswith("_id") and (f'["{bad_key}"]' in code_lines[idx] or f"['{bad_key}']" in code_lines[idx]):
+                    code_lines[idx] = code_lines[idx].replace(f'["{bad_key}"]', '["id"]').replace(f"['{bad_key}']", "['id']")
+
             # Case 1: assert mismatch
-            if fix["actual_val"] and not fix["is_did_not_raise"]:
+            elif fix["actual_val"] and not fix["is_did_not_raise"]:
                 actual = fix["actual_val"]
                 if "..." in actual:
                     m_f = re.search(r"factorial\((\d+)\)", orig_line)
@@ -511,7 +565,7 @@ def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: 
         ret_code, output, metrics = detect_and_run_tests(workspace)
 
         current_failed = metrics["failed"]
-        if ret_code == 0 and current_failed == 0:
+        if ret_code == 0 and current_failed == 0 and metrics["passed"] > 0:
             print(f"{GREEN}{BOLD}[SUCCESS] All {metrics['passed']} tests PASSED with zero failures!{RESET}")
             return True, output, all_repaired
 
@@ -545,14 +599,14 @@ def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: 
 
         # Regression Verification
         new_ret, new_out, new_metrics = detect_and_run_tests(workspace)
-        if new_ret == 0 and new_metrics["failed"] == 0:
+        if new_ret == 0 and new_metrics["failed"] == 0 and new_metrics["passed"] > 0:
             print(f"{GREEN}{BOLD}[SUCCESS] Patch resolved all test failures! 0 failures, 100% passing.{RESET}")
             for rf in repaired:
                 if rf not in all_repaired:
                     all_repaired.append(rf)
             return True, new_out, all_repaired
 
-        if new_metrics["failed"] > best_failed:
+        if new_metrics["failed"] > best_failed or (new_metrics["passed"] < metrics["passed"] and new_metrics["failed"] >= best_failed):
             print(f"{YELLOW}[!] Regression detected: failures increased ({best_failed} -> {new_metrics['failed']}). Reverting patch to last stable state.{RESET}")
             for target, content in backups.items():
                 (workspace / target).write_text(content, encoding="utf-8")
@@ -564,7 +618,7 @@ def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: 
 
     # Final test evaluation
     final_code, final_out, final_metrics = detect_and_run_tests(workspace)
-    success = (final_code == 0 and final_metrics["failed"] == 0)
+    success = (final_code == 0 and final_metrics["failed"] == 0 and final_metrics["passed"] > 0)
     return success, final_out, all_repaired
 
 

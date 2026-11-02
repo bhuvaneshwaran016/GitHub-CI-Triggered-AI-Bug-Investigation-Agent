@@ -14,3 +14,4 @@ services:
       - ./users.db:/app/users.db
       - ./analysis_workspace:/app/analysis_workspace
     restart: unless-stopped
+
