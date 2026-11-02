@@ -283,7 +283,7 @@ def parse_test_failures(workspace: Path, test_output: str) -> dict:
         for p in workspace.rglob("*.py"):
             try:
                 rel = p.relative_to(workspace).as_posix()
-                if not any(t in rel.lower() for t in ["test", "conftest", ".venv", "__pycache__"]):
+                if not any(t in rel.lower() for t in ["test", "conftest", ".venv", "__pycache__", "__init__.py"]):
                     combined_sources.append(rel)
             except Exception:
                 pass
@@ -503,6 +503,13 @@ def sanitize_patched_code(original_code: str, patched_code: str) -> str:
         if f"async def {fn}(" in patched_code and f"def {fn}(" in original_code:
             patched_code = patched_code.replace(f"async def {fn}(", f"def {fn}(")
 
+    # Prevent invalid await in synchronous functions (e.g. def func(...): return await ...)
+    if "await " in patched_code:
+        # If the original function was synchronous, strip invalid await calls
+        for fn in orig_sync_funcs:
+            pattern = rf"(def\s+{fn}\s*\([^)]*\):[\s\S]*?)(?:await\s+)"
+            patched_code = re.sub(pattern, r"\1", patched_code)
+
     return patched_code
 
 
@@ -515,7 +522,8 @@ def apply_dynamic_llm_repairs(workspace: Path, failure_info: dict, repo_url: str
         print(f"{YELLOW}[!] No specific source files identified in traceback. Scanning root Python files...{RESET}")
         files_to_repair = [p.relative_to(workspace).as_posix() for p in workspace.glob("*.py")]
 
-    repaired_files = []
+    # Strictly exclude __init__.py files from AI patching
+    files_to_repair = [f for f in files_to_repair if not f.endswith("__init__.py")]
 
     for rel_path in files_to_repair:
         file_path = workspace / rel_path
@@ -714,7 +722,7 @@ def get_workspace_diff(workspace: Path) -> str:
     return diff
 
 
-def push_repair_to_github(workspace: Path, branch: str = "main", modified_files: list = None):
+def push_repair_to_github(workspace: Path, branch: str = "main", modified_files: list = None) -> tuple[bool, str]:
     banner(f"PUSHING VERIFIED REPAIR TO GITHUB ({branch})")
 
     try:
@@ -723,7 +731,13 @@ def push_repair_to_github(workspace: Path, branch: str = "main", modified_files:
 
         if branch != curr_branch and branch:
             print(f"{YELLOW}[*] Switching to branch '{branch}'...{RESET}")
-            subprocess.run(["git", "-C", str(workspace), "checkout", "-B", branch], check=True)
+            fetch_res = subprocess.run(["git", "-C", str(workspace), "fetch", "origin", branch], capture_output=True, text=True)
+            chk_res = subprocess.run(["git", "-C", str(workspace), "checkout", branch], capture_output=True, text=True)
+            if chk_res.returncode != 0:
+                if fetch_res.returncode == 0:
+                    subprocess.run(["git", "-C", str(workspace), "checkout", "-b", branch, f"origin/{branch}"], capture_output=True)
+                else:
+                    subprocess.run(["git", "-C", str(workspace), "checkout", "-b", branch], capture_output=True)
 
         print(f"{YELLOW}[*] Staging all repaired files...{RESET}")
         subprocess.run(["git", "-C", str(workspace), "add", "-A"], check=True)
@@ -747,8 +761,9 @@ def push_repair_to_github(workspace: Path, branch: str = "main", modified_files:
             if commit_res.returncode != 0:
                 out = (commit_res.stdout + "\n" + commit_res.stderr).lower()
                 if "nothing to commit" not in out and "working tree clean" not in out:
-                    print(f"{RED}[ERROR] Git commit error:{RESET}\n{commit_res.stderr or commit_res.stdout}")
-                    return False
+                    err_msg = commit_res.stderr or commit_res.stdout
+                    print(f"{RED}[ERROR] Git commit error:{RESET}\n{err_msg}")
+                    return False, f"Git commit failed: {err_msg}"
         else:
             print(f"{GREEN}[*] Working tree clean; fixes are already committed in this branch.{RESET}")
 
@@ -766,16 +781,55 @@ def push_repair_to_github(workspace: Path, branch: str = "main", modified_files:
         if push_res.returncode == 0 or "everything up-to-date" in push_lower or "already up to date" in push_lower:
             print(f"\n{GREEN}{BOLD}[SUCCESS] Changes successfully pushed to GitHub!{RESET}")
             print(f"Repository branch: {branch}")
-            if "everything up-to-date" in push_lower or "already up to date" in push_lower:
-                print("All repaired commits are verified and up-to-date on GitHub.")
             print("\nGitHub Actions CI workflow has been automatically triggered!")
-            return True
-        else:
-            print(f"\n{RED}[ERROR] Git push failed:{RESET}\n{push_output}")
-            return False
+            return True, f"Successfully pushed fixes to branch '{branch}'."
+
+        # Handle non-fast-forward push rejection (fetch first / rejected)
+        if "fetch first" in push_lower or "non-fast-forward" in push_lower or "[rejected]" in push_lower:
+            print(f"{YELLOW}[*] Non-fast-forward detected on origin/{branch}. Attempting pull with rebase...{RESET}")
+            rebase_res = subprocess.run(
+                ["git", "-C", str(workspace), "pull", "--rebase", "origin", branch],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if rebase_res.returncode == 0:
+                print(f"{GREEN}[*] Rebase successful! Retrying push to origin/{branch}...{RESET}")
+                retry_res = subprocess.run(
+                    ["git", "-C", str(workspace), "push", "origin", branch],
+                    capture_output=True,
+                    text=True,
+                    timeout=40,
+                )
+                retry_out = (retry_res.stdout + "\n" + retry_res.stderr).strip()
+                if retry_res.returncode == 0 or "everything up-to-date" in retry_out.lower():
+                    print(f"\n{GREEN}{BOLD}[SUCCESS] Changes successfully rebased and pushed to GitHub!{RESET}")
+                    return True, f"Successfully rebased and pushed fixes to branch '{branch}'."
+
+            # If rebase had conflicts, abort rebase cleanly
+            subprocess.run(["git", "-C", str(workspace), "rebase", "--abort"], capture_output=True)
+
+            print(f"{YELLOW}[*] Updating remote branch with verified repair using force push...{RESET}")
+            force_res = subprocess.run(
+                ["git", "-C", str(workspace), "push", "--force", "origin", branch],
+                capture_output=True,
+                text=True,
+                timeout=40,
+            )
+            force_output = (force_res.stdout + "\n" + force_res.stderr).strip()
+            if force_res.returncode == 0 or "everything up-to-date" in force_output.lower():
+                print(f"\n{GREEN}{BOLD}[SUCCESS] Verified repair successfully pushed to GitHub!{RESET}")
+                print(f"Repository branch: {branch}")
+                return True, f"Successfully updated branch '{branch}' with verified repairs."
+            else:
+                print(f"\n{RED}[ERROR] Force push failed:{RESET}\n{force_output}")
+                return False, force_output
+
+        print(f"\n{RED}[ERROR] Git push failed:{RESET}\n{push_output}")
+        return False, push_output
     except Exception as err:
         print(f"\n{RED}[ERROR] Push error: {err}{RESET}")
-        return False
+        return False, str(err)
 
 
 def monitor_github_ci(repo_slug: str):
@@ -897,8 +951,8 @@ def main():
         branch_choice = input("Enter target push branch [main]: ").strip()
         push_branch = branch_choice if branch_choice else "main"
 
-        pushed = push_repair_to_github(workspace, branch=push_branch, modified_files=repaired_files)
-        if pushed and "github.com" in repo_source:
+        success, push_info = push_repair_to_github(workspace, branch=push_branch, modified_files=repaired_files)
+        if success and "github.com" in repo_source:
             monitor_github_ci(repo_slug)
     else:
         print("\nPush declined. Local repair remains preserved in workspace for review.")

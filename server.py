@@ -1302,7 +1302,9 @@ def approve_github_push(req: ApprovePushRequest):
     try:
         branch = req.branch or job.get("branch", "main")
         repaired_files = job.get("repaired_files", [])
-        success = ci_backend.push_repair_to_github(workspace, branch=branch, modified_files=repaired_files)
+        result = ci_backend.push_repair_to_github(workspace, branch=branch, modified_files=repaired_files)
+        success = result[0] if isinstance(result, tuple) else bool(result)
+        msg = result[1] if isinstance(result, tuple) else ("Changes pushed to branch!" if success else "Git push failed.")
 
         if success:
             job["status"] = "pushed"
@@ -1316,7 +1318,9 @@ def approve_github_push(req: ApprovePushRequest):
                 "branch": branch,
             }
         else:
-            raise HTTPException(status_code=500, detail="Git push operation failed. Check terminal git permissions.")
+            raise HTTPException(status_code=400, detail=f"Git push failed: {msg}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

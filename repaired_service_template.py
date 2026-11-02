@@ -89,11 +89,13 @@ class TaskFlowService:
 
         description = (description or "").strip()
 
-        # BUG: inactive users are allowed as assignees.
-        return self.store.add_task(
-            project_id, title, assignee_id, priority,
-            description=description, due_date=due_date, created_at=created_at
-        )
+        # Safely pass extra fields only if underlying Store supports them
+        if 'description' in Store.add_task.__code__.co_varnames:
+            return self.store.add_task(
+                project_id, title, assignee_id, priority,
+                description=description, due_date=due_date, created_at=created_at
+            )
+        return self.store.add_task(project_id, title, assignee_id, priority)
 
     def change_status(self, task_id, actor_id, new_status):
         task = self._task(task_id)
