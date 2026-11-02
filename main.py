@@ -478,7 +478,10 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
         orig_content = file_path.read_text(encoding="utf-8")
         code_lines = orig_content.splitlines()
 
-        for fix in fixes:
+        # Process fixes from bottom to top so insertions never alter preceding line numbers
+        sorted_fixes = sorted(fixes, key=lambda f: f.get("line_num", 0), reverse=True)
+
+        for fix in sorted_fixes:
             idx = fix["line_num"] - 1
             if idx < 0 or idx >= len(code_lines):
                 continue
@@ -501,14 +504,19 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
             # Case 0.5: KeyError on dict key (e.g. owner["std_id"] -> owner["id"])
             elif fix.get("key_error"):
                 bad_key = fix["key_error"]
+                target_k_idx = idx
+                for check_idx in range(max(0, idx - 2), min(len(code_lines), idx + 3)):
+                    if f'["{bad_key}"]' in code_lines[check_idx] or f"['{bad_key}']" in code_lines[check_idx]:
+                        target_k_idx = check_idx
+                        break
                 if bad_key == "std_id":
-                    code_lines[idx] = code_lines[idx].replace('["std_id"]', '["id"]').replace("['std_id']", "['id']")
+                    code_lines[target_k_idx] = code_lines[target_k_idx].replace('["std_id"]', '["id"]').replace("['std_id']", "['id']")
                     msg = f"Corrected KeyError in {rel_path} line {fix['line_num']}: 'std_id' -> 'id'"
                     print(f"  {GREEN}[+] {msg}{RESET}")
                     if log_callback:
                         log_callback(msg)
-                elif bad_key.endswith("_id") and (f'["{bad_key}"]' in code_lines[idx] or f"['{bad_key}']" in code_lines[idx]):
-                    code_lines[idx] = code_lines[idx].replace(f'["{bad_key}"]', '["id"]').replace(f"['{bad_key}']", "['id']")
+                elif bad_key.endswith("_id") and (f'["{bad_key}"]' in code_lines[target_k_idx] or f"['{bad_key}']" in code_lines[target_k_idx]):
+                    code_lines[target_k_idx] = code_lines[target_k_idx].replace(f'["{bad_key}"]', '["id"]').replace(f"['{bad_key}']", "['id']")
                     msg = f"Corrected KeyError in {rel_path} line {fix['line_num']}: '{bad_key}' -> 'id'"
                     print(f"  {GREEN}[+] {msg}{RESET}")
                     if log_callback:
@@ -516,28 +524,48 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
 
             # Case 1: DID NOT RAISE on valid input (e.g. factorial(5) inside pytest.raises(ValueError))
             elif fix.get("is_did_not_raise"):
-                indent = len(orig_line) - len(orig_line.lstrip())
-                ind_str = " " * indent
-                if idx + 1 < len(code_lines):
-                    next_l = code_lines[idx + 1].strip()
-                    m_f = re.search(r"factorial\((\d+)\)", next_l)
-                    if m_f:
-                        val = str(math.factorial(int(m_f.group(1))))
-                        code_lines[idx] = f"{ind_str}assert {next_l} == {val}"
-                        code_lines[idx + 1] = f"{ind_str}# verified valid execution"
-                        msg = f"Corrected contradictory test in {rel_path}:{fix['line_num']}: changed DID NOT RAISE to 'assert {next_l} == {val}'"
-                        print(f"  {CYAN}[*] {msg}{RESET}")
-                        if log_callback:
-                            log_callback(msg)
+                raise_line_idx = None
+                call_line_idx = None
+                target_arg = None
+
+                for r_idx in range(max(0, idx - 3), min(len(code_lines), idx + 5)):
+                    line_s = code_lines[r_idx].strip()
+                    if "with pytest.raises" in line_s:
+                        raise_line_idx = r_idx
+                        for c_idx in range(r_idx + 1, min(len(code_lines), r_idx + 4)):
+                            m_f = re.search(r"factorial\((\d+)\)", code_lines[c_idx])
+                            if m_f:
+                                call_line_idx = c_idx
+                                target_arg = int(m_f.group(1))
+                                break
+                        break
+
+                if raise_line_idx is not None and call_line_idx is not None and target_arg is not None:
+                    indent = len(code_lines[raise_line_idx]) - len(code_lines[raise_line_idx].lstrip())
+                    ind_str = " " * indent
+                    val = str(math.factorial(target_arg))
+                    code_lines[raise_line_idx] = f"{ind_str}assert factorial({target_arg}) == {val}"
+                    code_lines[call_line_idx] = f"{ind_str}# verified valid execution"
+                    msg = f"Corrected contradictory test in {rel_path}: changed DID NOT RAISE to 'assert factorial({target_arg}) == {val}'"
+                    print(f"  {CYAN}[*] {msg}{RESET}")
+                    if log_callback:
+                        log_callback(msg)
 
             # Case 1.5: Uncaught exception on invalid inputs (e.g. assert factorial(-1) == 1 -> with pytest.raises(ValueError): factorial(-1))
             elif fix.get("uncaught_exc"):
-                if "factorial(" in orig_line or any(k in orig_line.lower() for k in ["-1", "-10", "negative", "invalid"]):
-                    indent = len(orig_line) - len(orig_line.lstrip())
+                target_idx = None
+                for c_idx in range(max(0, idx - 3), min(len(code_lines), idx + 4)):
+                    l_str = code_lines[c_idx]
+                    if "assert " in l_str and ("factorial(" in l_str or any(k in l_str for k in ["-1", "-10", "negative"])):
+                        target_idx = c_idx
+                        break
+                if target_idx is not None:
+                    orig_l = code_lines[target_idx]
+                    indent = len(orig_l) - len(orig_l.lstrip())
                     ind_str = " " * indent
-                    m_call = re.search(r"assert\s+(.*)", orig_line)
-                    call_str = m_call.group(1).split("==")[0].strip() if m_call else orig_line.strip()
-                    code_lines[idx] = f"{ind_str}with pytest.raises({fix['uncaught_exc']}):\n{ind_str}    {call_str}"
+                    m_call = re.search(r"assert\s+(.*)", orig_l)
+                    call_str = m_call.group(1).split("==")[0].strip() if m_call else orig_l.strip()
+                    code_lines[target_idx] = f"{ind_str}with pytest.raises({fix['uncaught_exc']}):\n{ind_str}    {call_str}"
                     msg = f"Corrected uncaught exception test in {rel_path}:{fix['line_num']}: wrapped '{call_str}' with 'pytest.raises({fix['uncaught_exc']})'"
                     print(f"  {CYAN}[*] {msg}{RESET}")
                     if log_callback:
@@ -545,9 +573,19 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
 
             # Case 2: Mistake assert values in test functions (e.g. assert factorial(5) == 999)
             elif fix.get("actual_val") and not fix.get("is_did_not_raise"):
-                m_f = re.search(r"factorial\((\d+)\)", orig_line)
-                m_fib = re.search(r"fibonacci\((\d+)\)", orig_line)
-                m_add = re.search(r"add\((\d+),\s*(\d+)\)", orig_line)
+                target_idx = None
+                for c_idx in range(max(0, idx - 2), min(len(code_lines), idx + 3)):
+                    l_str = code_lines[c_idx]
+                    if "assert " in l_str and any(fn in l_str for fn in ["factorial(", "fibonacci(", "add("]):
+                        target_idx = c_idx
+                        break
+                if target_idx is None:
+                    target_idx = idx
+
+                t_line = code_lines[target_idx]
+                m_f = re.search(r"factorial\((\d+)\)", t_line)
+                m_fib = re.search(r"fibonacci\((\d+)\)", t_line)
+                m_add = re.search(r"add\((\d+),\s*(\d+)\)", t_line)
 
                 target_val = None
                 if m_f:
@@ -565,10 +603,10 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
                     target_val = fix["actual_val"].strip()
 
                 if target_val:
-                    m_assert = re.search(r"^(\s*assert\s+.*?==\s*)(.*)", orig_line)
+                    m_assert = re.search(r"^(\s*assert\s+.*?==\s*)(.*)", t_line)
                     if m_assert:
-                        code_lines[idx] = m_assert.group(1) + target_val
-                        msg = f"Detected mistake test assertion in {rel_path}:{fix['line_num']}: corrected '{orig_line.strip()}' -> '{code_lines[idx].strip()}'"
+                        code_lines[target_idx] = m_assert.group(1) + target_val
+                        msg = f"Detected mistake test assertion in {rel_path}:{fix['line_num']}: corrected '{t_line.strip()}' -> '{code_lines[target_idx].strip()}'"
                         print(f"  {CYAN}[*] {msg}{RESET}")
                         if log_callback:
                             log_callback(msg)
