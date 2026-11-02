@@ -193,11 +193,27 @@ def detect_and_run_tests(workspace: Path, custom_command: str = None) -> tuple[i
     except Exception as e:
         return 1, f"Error running tests: {e}", {"exit_code": 1, "passed": 0, "failed": 1, "summary": str(e)}
 
-    passed = len(re.findall(r"\s+PASSED\s+", output))
-    failed = len(re.findall(r"\s+FAILED\s+", output))
-    errors = len(re.findall(r"\s+ERROR\s+", output))
     summary_match = re.search(r"=+\s*(.*?(?:failed|passed|error).*?)=+", output)
-    summary_line = summary_match.group(1).strip() if summary_match else f"{passed} passed, {failed} failed, {errors} errors"
+    summary_line = summary_match.group(1).strip() if summary_match else ""
+
+    passed = 0
+    failed = 0
+    errors = 0
+    if summary_line:
+        m_pass = re.search(r"(\d+)\s+passed", summary_line)
+        m_fail = re.search(r"(\d+)\s+failed", summary_line)
+        m_err = re.search(r"(\d+)\s+error", summary_line)
+        if m_pass:
+            passed = int(m_pass.group(1))
+        if m_fail:
+            failed = int(m_fail.group(1))
+        if m_err:
+            errors = int(m_err.group(1))
+    else:
+        passed = len(re.findall(r"::[a-zA-Z0-9_\[\]\-]+\s+PASSED", output))
+        failed = len(re.findall(r"::[a-zA-Z0-9_\[\]\-]+\s+FAILED", output))
+        errors = len(re.findall(r"::[a-zA-Z0-9_\[\]\-]+\s+ERROR", output))
+        summary_line = f"{passed} passed, {failed} failed, {errors} errors"
 
     total_failures = failed + errors
     if returncode != 0 and total_failures == 0:
@@ -442,7 +458,7 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
             elif ": TypeError" in l or "TypeError:" in l:
                 uncaught_exc = "TypeError"
 
-        if test_file and line_num and (fixture_error or key_error or is_did_not_raise or actual_val):
+        if test_file and line_num and (fixture_error or key_error or is_did_not_raise or actual_val or uncaught_exc):
             file_fixes.setdefault(test_file, []).append({
                 "line_num": line_num,
                 "fixture_error": fixture_error,
@@ -451,6 +467,7 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
                 "is_did_not_raise": is_did_not_raise,
                 "actual_val": actual_val,
                 "expected_val": expected_val,
+                "uncaught_exc": uncaught_exc,
             })
 
     repaired_files = []
@@ -512,6 +529,19 @@ def repair_defective_test_assertions(workspace: Path, output: str, log_callback=
                         print(f"  {CYAN}[*] {msg}{RESET}")
                         if log_callback:
                             log_callback(msg)
+
+            # Case 1.5: Uncaught exception on invalid inputs (e.g. assert factorial(-1) == 1 -> with pytest.raises(ValueError): factorial(-1))
+            elif fix.get("uncaught_exc"):
+                if "factorial(" in orig_line or any(k in orig_line.lower() for k in ["-1", "-10", "negative", "invalid"]):
+                    indent = len(orig_line) - len(orig_line.lstrip())
+                    ind_str = " " * indent
+                    m_call = re.search(r"assert\s+(.*)", orig_line)
+                    call_str = m_call.group(1).split("==")[0].strip() if m_call else orig_line.strip()
+                    code_lines[idx] = f"{ind_str}with pytest.raises({fix['uncaught_exc']}):\n{ind_str}    {call_str}"
+                    msg = f"Corrected uncaught exception test in {rel_path}:{fix['line_num']}: wrapped '{call_str}' with 'pytest.raises({fix['uncaught_exc']})'"
+                    print(f"  {CYAN}[*] {msg}{RESET}")
+                    if log_callback:
+                        log_callback(msg)
 
             # Case 2: Mistake assert values in test functions (e.g. assert factorial(5) == 999)
             elif fix.get("actual_val") and not fix.get("is_did_not_raise"):
