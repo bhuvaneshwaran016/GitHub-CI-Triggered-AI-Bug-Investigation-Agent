@@ -1286,7 +1286,6 @@ def start_ci_repair(req: StartRepairRequest, background_tasks: BackgroundTasks):
 
     background_tasks.add_task(run_repair_pipeline_job, job_id, repo_url, req.branch or "main", rounds)
     return {"job_id": job_id, "status": "queued", "message": "Repair pipeline initiated in background"}
-    return {"job_id": job_id, "status": "queued", "message": "Repair pipeline initiated in background"}
 
 
 @app.get("/api/ci/status/{job_id}")

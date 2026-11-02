@@ -525,6 +525,8 @@ def apply_dynamic_llm_repairs(workspace: Path, failure_info: dict, repo_url: str
     # Strictly exclude __init__.py files from AI patching
     files_to_repair = [f for f in files_to_repair if not f.endswith("__init__.py")]
 
+    repaired_files = []
+
     for rel_path in files_to_repair:
         file_path = workspace / rel_path
         if not file_path.is_file():
