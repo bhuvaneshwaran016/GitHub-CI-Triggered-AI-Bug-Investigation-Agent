@@ -1140,6 +1140,12 @@ def test_llm_connection_endpoint(
 # ==========================================
 def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str, max_iterations: int = 5):
     job = JOBS[job_id]
+    # Always reload ci_backend from disk on each job execution so patches are active immediately
+    try:
+        import importlib
+        importlib.reload(ci_backend)
+    except Exception:
+        pass
     try:
         job["status"] = "running"
         job["current_step"] = 1
