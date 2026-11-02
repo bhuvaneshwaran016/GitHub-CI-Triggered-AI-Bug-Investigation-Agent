@@ -2320,8 +2320,8 @@
     try {
       const selectServer = document.getElementById("select-server-model");
       let model = selectServer?.value === "custom"
-        ? (document.getElementById("input-custom-model")?.value.trim() || "llama-3.3-70b-versatile")
-        : (selectServer?.value || "llama-3.3-70b-versatile");
+        ? (document.getElementById("input-custom-model")?.value.trim() || "qwen/qwen3.8-27b")
+        : (selectServer?.value || "qwen/qwen3.8-27b");
       const endpoint = document.getElementById("input-api-endpoint")?.value.trim() || "https://api.groq.com/openai/v1";
       const apiKey = document.getElementById("input-api-key")?.value.trim() || "";
 

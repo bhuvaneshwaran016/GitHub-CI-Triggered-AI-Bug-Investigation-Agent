@@ -135,35 +135,35 @@ class LLMConfigUpdateRequest(BaseModel):
 
 class LLMTestRequest(BaseModel):
     provider: Optional[str] = "server"
-    model: Optional[str] = "llama-3.3-70b-versatile"
+    model: Optional[str] = "qwen/qwen3.8-27b"
     api_key: Optional[str] = None
     api_endpoint: Optional[str] = "https://api.groq.com/openai/v1"
 
 
 CURATED_SERVER_MODELS = [
     {
-        "id": "llama-3.3-70b-versatile",
-        "name": "Llama 3.3 70B Versatile",
+        "id": "qwen/qwen3.8-27b",
+        "name": "Qwen 3.8 27B",
         "provider": "Groq",
         "default_endpoint": "https://api.groq.com/openai/v1",
-        "description": "Ultra-fast state-of-the-art reasoning & code synthesis (128k context)",
+        "description": "High-speed coding, synthesis, and deep fault analysis (128k context)",
         "badge": "Recommended"
     },
     {
-        "id": "llama-3.1-8b-instant",
-        "name": "Llama 3.1 8B Instant",
+        "id": "openai/gpt-oss-20b",
+        "name": "GPT-OSS 20B",
         "provider": "Groq",
         "default_endpoint": "https://api.groq.com/openai/v1",
-        "description": "Sub-second response speed for rapid unit testing & analysis",
-        "badge": "Fastest"
+        "description": "Fast open-weights reasoning model optimized on Groq LPU (128k context)",
+        "badge": "Fast"
     },
     {
-        "id": "mixtral-8x7b-32768",
-        "name": "Mixtral 8x7B MoE",
+        "id": "openai/gpt-oss-120b",
+        "name": "GPT-OSS 120B",
         "provider": "Groq",
         "default_endpoint": "https://api.groq.com/openai/v1",
-        "description": "Deep multi-expert architecture with 32k context window",
-        "badge": "MoE"
+        "description": "Flagship 120B large reasoning model for complex code repair",
+        "badge": "Large"
     },
     {
         "id": "gpt-4o-mini",
@@ -278,7 +278,7 @@ def query_llm_for_user(user_id: Optional[str], prompt: str) -> Tuple[str, Dict[s
 
         endpoint = config.get("api_endpoint", "https://api.groq.com/openai/v1").rstrip("/")
         chat_url = endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
-        active_model = config.get("active_model", "llama-3.3-70b-versatile")
+        active_model = config.get("active_model", "qwen/qwen3.8-27b")
 
         headers = {
             "Content-Type": "application/json",
@@ -1099,7 +1099,7 @@ def test_llm_connection_endpoint(
 
     endpoint = (req.api_endpoint or "https://api.groq.com/openai/v1").rstrip("/")
     chat_url = endpoint if endpoint.endswith("/chat/completions") else f"{endpoint}/chat/completions"
-    active_model = req.model or "llama-3.3-70b-versatile"
+    active_model = req.model or "qwen/qwen3.8-27b"
 
     headers = {
         "Content-Type": "application/json",
