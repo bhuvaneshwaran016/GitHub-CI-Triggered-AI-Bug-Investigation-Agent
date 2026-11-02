@@ -1213,7 +1213,13 @@ def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str, max_iterati
         job["logs"].append(f"Running iterative multi-round code repair loop ({rounds} rounds max)...")
         save_jobs_store()
 
-        success, final_out, repaired_files = ci_backend.autonomous_repair_loop(workspace, repo_url=repo_url, max_iterations=rounds)
+        def log_cb(msg):
+            job["logs"].append(msg)
+            save_jobs_store()
+
+        success, final_out, repaired_files = ci_backend.autonomous_repair_loop(
+            workspace, repo_url=repo_url, max_iterations=rounds, log_callback=log_cb
+        )
 
         diff = ci_backend.get_workspace_diff(workspace)
         job["diff"] = diff
