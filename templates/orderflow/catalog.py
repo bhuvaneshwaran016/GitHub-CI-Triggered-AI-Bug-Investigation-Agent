@@ -23,3 +23,4 @@ def paginate(items: list, page: int = 1, page_size: int = 10) -> list:
         raise ValueError("page and page_size must be positive")
     start = (page - 1) * page_size
     return items[start:start + page_size]
+

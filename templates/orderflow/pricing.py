@@ -26,3 +26,4 @@ def calculate_tax(taxable_amount: float, tax_rate: float = 0.08) -> float:
 
 def calculate_total(subtotal: float, discount: float, tax: float, shipping: float) -> float:
     return money(subtotal - discount + tax + shipping)
+

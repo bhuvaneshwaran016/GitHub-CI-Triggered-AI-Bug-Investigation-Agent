@@ -38,3 +38,4 @@ class Inventory:
 
     def all_products(self) -> list[Product]:
         return list(self._products.values())
+

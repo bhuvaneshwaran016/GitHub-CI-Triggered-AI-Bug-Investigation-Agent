@@ -24,3 +24,4 @@ class PaymentGateway:
         self._charges[idempotency_key] -= amount
         if self._charges[idempotency_key] < 0:
             raise PaymentError("refund exceeds captured amount")
+

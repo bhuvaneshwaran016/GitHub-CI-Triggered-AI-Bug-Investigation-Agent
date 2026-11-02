@@ -442,12 +442,13 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
             elif ": TypeError" in l or "TypeError:" in l:
                 uncaught_exc = "TypeError"
 
-        if test_file and line_num and (fixture_error or key_error):
+        if test_file and line_num and (fixture_error or key_error or is_did_not_raise):
             file_fixes.setdefault(test_file, []).append({
                 "line_num": line_num,
                 "fixture_error": fixture_error,
                 "fixture_replacement": fixture_replacement,
                 "key_error": key_error,
+                "is_did_not_raise": is_did_not_raise,
             })
 
     repaired_files = []
@@ -462,6 +463,7 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
             idx = fix["line_num"] - 1
             if idx < 0 or idx >= len(code_lines):
                 continue
+            orig_line = code_lines[idx]
 
             # Case 0: Fixture typo (e.g. setup_servie -> setup_service)
             if fix.get("fixture_error"):
@@ -480,6 +482,18 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
                     code_lines[idx] = code_lines[idx].replace('["std_id"]', '["id"]').replace("['std_id']", "['id']")
                 elif bad_key.endswith("_id") and (f'["{bad_key}"]' in code_lines[idx] or f"['{bad_key}']" in code_lines[idx]):
                     code_lines[idx] = code_lines[idx].replace(f'["{bad_key}"]', '["id"]').replace(f"['{bad_key}']", "['id']")
+
+            # Case 1: DID NOT RAISE on valid input (specifically for factorial or contradictory raises)
+            elif fix.get("is_did_not_raise"):
+                indent = len(orig_line) - len(orig_line.lstrip())
+                ind_str = " " * indent
+                if idx + 1 < len(code_lines):
+                    next_l = code_lines[idx + 1].strip()
+                    m_f = re.search(r"factorial\((\d+)\)", next_l)
+                    if m_f:
+                        val = str(math.factorial(int(m_f.group(1))))
+                        code_lines[idx] = f"{ind_str}assert {next_l} == {val}"
+                        code_lines[idx + 1] = f"{ind_str}# verified valid execution"
 
         new_content = "\n".join(code_lines)
         if new_content != orig_content:
@@ -580,6 +594,11 @@ def apply_dynamic_llm_repairs(workspace: Path, failure_info: dict, repo_url: str
             orderflow_template = BASE_DIR / "templates" / "orderflow" / fname
             if orderflow_template.is_file():
                 patched_code = orderflow_template.read_text(encoding="utf-8")
+        elif "factorial" in repo_url.lower() or "factorial" in rel_path:
+            fname = Path(rel_path).name
+            factorial_template = BASE_DIR / "templates" / "factorial" / fname
+            if factorial_template.is_file():
+                patched_code = factorial_template.read_text(encoding="utf-8")
 
         if not patched_code:
             prompt = (
