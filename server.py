@@ -851,7 +851,7 @@ def project_chat(req: ChatRequest, authorization: Optional[str] = Header(None)):
             history_str += f"{role}: {content}\n"
 
     prompt = (
-        f"You are Antigravity CI Architect, an expert developer assistant.\n"
+        f"You are CI Project Architect, an expert developer assistant.\n"
         f"The user is asking questions about this project:\n\n"
         f"{context_str}\n\n"
         f"CONVERSATION HISTORY:\n{history_str}\n\n"

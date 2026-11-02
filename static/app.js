@@ -1364,7 +1364,7 @@
         studioMessages.innerHTML = `
           <div class="chat-bubble chat-bubble-ai">
             <div class="chat-sender-tag">🤖 Project Architect</div>
-            Hello! I am your Antigravity Project Architect. Ask me anything about this codebase, its architecture, execution flow, or where to add a feature. Your questions and answers are stored securely in the SQLite database.
+            Hello! Welcome to CI_Agent. I can explain the project architecture, trace execution flow, and help you locate where to add new features.
           </div>
         `;
         return;
