@@ -44,11 +44,15 @@ def extract_repo_slug(url: str) -> str:
     return url.strip()
 
 
-def check_remote_ci_failure(repo_slug: str):
-    print(f"{YELLOW}[*] Inspecting GitHub Actions CI runs for {repo_slug}...{RESET}")
+def check_remote_ci_failure(repo_slug: str, branch: str = None):
+    branch_info = f" on branch '{branch}'" if branch else " across all branches"
+    print(f"{YELLOW}[*] Inspecting GitHub Actions CI runs for {repo_slug}{branch_info}...{RESET}")
     try:
+        cmd = ["gh", "run", "list", "--repo", repo_slug, "--limit", "5", "--json", "databaseId,name,status,conclusion,url,headBranch"]
+        if branch and branch.strip():
+            cmd.extend(["--branch", branch.strip()])
         res = subprocess.run(
-            ["gh", "run", "list", "--repo", repo_slug, "--limit", "3", "--json", "databaseId,name,status,conclusion,url,headBranch"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=15,
@@ -78,7 +82,7 @@ def remove_readonly(func, path, excinfo):
         pass
 
 
-def setup_isolated_workspace(repo_source: str) -> Path:
+def setup_isolated_workspace(repo_source: str, branch: str = "main") -> Path:
     print(f"{YELLOW}[*] Preparing isolated workspace...{RESET}")
     if WORKSPACE_DIR.exists():
         shutil.rmtree(WORKSPACE_DIR, onerror=remove_readonly)
@@ -95,8 +99,17 @@ def setup_isolated_workspace(repo_source: str) -> Path:
         subprocess.run(["git", "add", "."], cwd=str(WORKSPACE_DIR), capture_output=True)
         subprocess.run(["git", "commit", "-m", "Initial baseline"], cwd=str(WORKSPACE_DIR), capture_output=True)
     else:
-        print(f"  Cloning target repository: {repo_source}")
-        subprocess.run(["git", "clone", "--depth", "1", repo_source, str(WORKSPACE_DIR)], check=True)
+        target_branch = branch.strip() if branch else "main"
+        print(f"  Cloning target repository: {repo_source} (branch: {target_branch})")
+        clone_cmd = ["git", "clone", "--depth", "1"]
+        if target_branch:
+            clone_cmd.extend(["--branch", target_branch])
+        clone_cmd.extend([repo_source, str(WORKSPACE_DIR)])
+        try:
+            subprocess.run(clone_cmd, check=True)
+        except subprocess.CalledProcessError:
+            print(f"  {YELLOW}[!] Branch '{target_branch}' clone failed; falling back to default remote branch...{RESET}")
+            subprocess.run(["git", "clone", "--depth", "1", repo_source, str(WORKSPACE_DIR)], check=True)
 
     print(f"  {GREEN}Isolated workspace ready at: {WORKSPACE_DIR}{RESET}")
     return WORKSPACE_DIR
@@ -819,13 +832,19 @@ def main():
     repo_slug = extract_repo_slug(repo_source)
     print(f"Target repository: {CYAN}{repo_source}{RESET}")
 
+    if len(sys.argv) > 2 and sys.argv[2].strip():
+        branch_source = sys.argv[2].strip()
+    else:
+        branch_input = input("Enter branch to test/repair [main]: ").strip()
+        branch_source = branch_input if branch_input else "main"
+
     # Check remote CI failure if applicable
     if "github.com" in repo_source:
-        check_remote_ci_failure(repo_slug)
+        check_remote_ci_failure(repo_slug, branch=branch_source)
 
     # Step 2: Isolated workspace setup & dependency installation
     banner("STEP 2: ISOLATING WORKSPACE & INSTALLING DEPENDENCIES")
-    workspace = setup_isolated_workspace(repo_source)
+    workspace = setup_isolated_workspace(repo_source, branch=branch_source)
     install_workspace_dependencies(workspace)
 
     # Step 3: Run Baseline Tests

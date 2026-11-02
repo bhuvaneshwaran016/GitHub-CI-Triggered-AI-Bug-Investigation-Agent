@@ -650,7 +650,15 @@ def analyze_project(req: AnalyzeRepoRequest):
             shutil.rmtree(target_dir, onerror=ci_backend.remove_readonly)
 
         # Clone repository
-        subprocess.run(["git", "clone", "--depth", "1", repo_url, str(target_dir)], check=True, capture_output=True, timeout=60)
+        target_branch = req.branch.strip() if req.branch else "main"
+        clone_cmd = ["git", "clone", "--depth", "1"]
+        if target_branch:
+            clone_cmd.extend(["--branch", target_branch])
+        clone_cmd.extend([repo_url, str(target_dir)])
+        try:
+            subprocess.run(clone_cmd, check=True, capture_output=True, timeout=60)
+        except subprocess.CalledProcessError:
+            subprocess.run(["git", "clone", "--depth", "1", repo_url, str(target_dir)], check=True, capture_output=True, timeout=60)
 
         project_name = ci_backend.extract_repo_slug(repo_url)
         full_res, retrieval_index = analyze_codebase_full(target_dir, project_name)
@@ -1141,7 +1149,8 @@ def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str):
         # Step 1: Workspace isolation
         repo_slug = ci_backend.extract_repo_slug(repo_url)
         job["repo_slug"] = repo_slug
-        workspace = ci_backend.setup_isolated_workspace(repo_url)
+        target_branch = branch if branch else "main"
+        workspace = ci_backend.setup_isolated_workspace(repo_url, branch=target_branch)
         job["logs"].append("Workspace isolated successfully. Installing dependencies...")
         save_jobs_store()
 
