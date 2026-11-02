@@ -119,6 +119,7 @@ class WorkspaceCleanRequest(BaseModel):
 class StartRepairRequest(BaseModel):
     repo_url: str
     branch: Optional[str] = "main"
+    max_iterations: Optional[int] = 5
 
 class ApprovePushRequest(BaseModel):
     job_id: str
@@ -1137,7 +1138,7 @@ def test_llm_connection_endpoint(
 # ==========================================
 # CI Repair Agent Endpoints
 # ==========================================
-def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str):
+def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str, max_iterations: int = 5):
     job = JOBS[job_id]
     try:
         job["status"] = "running"
@@ -1208,10 +1209,11 @@ def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str):
         # Step 4: Autonomous repair loop
         job["current_step"] = 4
         job["step_name"] = "Autonomous Repair Verification"
-        job["logs"].append("Running iterative multi-round code repair loop with regression detection...")
+        rounds = max_iterations if (max_iterations and max_iterations > 0) else 5
+        job["logs"].append(f"Running iterative multi-round code repair loop ({rounds} rounds max)...")
         save_jobs_store()
 
-        success, final_out, repaired_files = ci_backend.autonomous_repair_loop(workspace, repo_url=repo_url, max_iterations=3)
+        success, final_out, repaired_files = ci_backend.autonomous_repair_loop(workspace, repo_url=repo_url, max_iterations=rounds)
 
         diff = ci_backend.get_workspace_diff(workspace)
         job["diff"] = diff
@@ -1262,10 +1264,12 @@ def start_ci_repair(req: StartRepairRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Repository URL is required")
 
     job_id = f"job-{uuid.uuid4().hex[:8]}"
+    rounds = req.max_iterations if (req.max_iterations and req.max_iterations > 0) else 5
     JOBS[job_id] = {
         "job_id": job_id,
         "repo_url": repo_url,
         "branch": req.branch or "main",
+        "max_iterations": rounds,
         "status": "queued",
         "current_step": 0,
         "step_name": "Initializing",
@@ -1280,7 +1284,8 @@ def start_ci_repair(req: StartRepairRequest, background_tasks: BackgroundTasks):
     }
     save_jobs_store()
 
-    background_tasks.add_task(run_repair_pipeline_job, job_id, repo_url, req.branch or "main")
+    background_tasks.add_task(run_repair_pipeline_job, job_id, repo_url, req.branch or "main", rounds)
+    return {"job_id": job_id, "status": "queued", "message": "Repair pipeline initiated in background"}
     return {"job_id": job_id, "status": "queued", "message": "Repair pipeline initiated in background"}
 
 

@@ -966,7 +966,7 @@
       const res = await fetch("/api/project/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repoUrl, branch }),
+        body: JSON.stringify({ repo_url: repoUrl, branch, max_iterations: maxIterations }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Analysis failed");
@@ -1713,6 +1713,8 @@
   btnStartRepair?.addEventListener("click", async () => {
     const repoUrl = document.getElementById("input-repair-repo").value.trim();
     const branch = document.getElementById("input-repair-branch").value.trim() || "main";
+    const roundsEl = document.getElementById("input-repair-rounds");
+    const maxIterations = roundsEl ? parseInt(roundsEl.value) : 5;
 
     if (!repoUrl) {
       showToast("Please enter a GitHub repository URL", "error");
@@ -1748,7 +1750,7 @@
       const res = await fetch("/api/ci/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repoUrl, branch }),
+        body: JSON.stringify({ repo_url: repoUrl, branch, max_iterations: maxIterations }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Failed to start repair job");

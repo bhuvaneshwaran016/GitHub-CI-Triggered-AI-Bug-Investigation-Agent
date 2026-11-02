@@ -570,19 +570,21 @@ def apply_dynamic_llm_repairs(workspace: Path, failure_info: dict, repo_url: str
     return repaired_files
 
 
-def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: int = 3) -> tuple[bool, str, list]:
+def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: int = 5) -> tuple[bool, str, list]:
     """
-    Adaptive Multi-Round Repair Loop with Regression Rollback:
-    1. Saves pre-patch backups.
-    2. Repairs source code if source files are involved.
-    3. Reverts patch immediately if regressions or increased failures are detected.
-    4. Only repairs test assertions when implementation is proven clean or test assertions have value mismatches.
+    Adaptive Multi-Round Repair Loop with Regression Rollback & Dynamic Extension:
+    1. Saves pre-patch backups for safe rollback.
+    2. Reconciles defective test assertions, fixture typos, and KeyError mismatches first.
+    3. Multi-strategy repair alternating between source code logic and test expectation alignments.
+    4. Auto-extends iterations if failures are actively decreasing towards 0.
     """
     all_repaired = []
     best_failed = float("inf")
+    iteration = 1
+    total_allowed = max_iterations if (max_iterations and max_iterations > 0) else 5
 
-    for iteration in range(1, max_iterations + 1):
-        print(f"\n{CYAN}{BOLD}--- Autonomous Repair Round {iteration}/{max_iterations} ---{RESET}")
+    while iteration <= total_allowed:
+        print(f"\n{CYAN}{BOLD}--- Autonomous Repair Round {iteration}/{total_allowed} ---{RESET}")
         ret_code, output, metrics = detect_and_run_tests(workspace)
 
         current_failed = metrics["failed"]
@@ -600,23 +602,51 @@ def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: 
 
         # Snapshot current workspace files for rollback protection
         backups = {}
-        for target in failure_info["target_files"]:
+        all_candidate_files = failure_info["target_files"] + failure_info["test_files"] + failure_info["source_files"]
+        for target in set(all_candidate_files):
             t_path = workspace / target
             if t_path.is_file():
                 backups[target] = t_path.read_text(encoding="utf-8")
 
         repaired = []
-        if failure_info["source_files"]:
-            print(f"{YELLOW}[*] Round {iteration} Strategy: Repairing application source implementation...{RESET}")
-            repaired = apply_dynamic_llm_repairs(workspace, failure_info, repo_url=repo_url, target_files=failure_info["source_files"])
-        else:
-            print(f"{YELLOW}[*] Round {iteration} Strategy: Diagnosing and repairing defective test assertions...{RESET}")
-            test_repaired = repair_defective_test_assertions(workspace, output)
-            repaired = test_repaired
 
-            if not test_repaired:
-                targets = failure_info["test_files"] if failure_info["test_files"] else failure_info["target_files"]
-                repaired = apply_dynamic_llm_repairs(workspace, failure_info, repo_url=repo_url, target_files=targets)
+        # Step 1: Always check for and heal test assertions, fixture typos, and dictionary keys
+        test_repaired = repair_defective_test_assertions(workspace, output)
+        if test_repaired:
+            for tf in test_repaired:
+                if tf not in repaired:
+                    repaired.append(tf)
+
+            # Re-test immediately after test reconciliation
+            t_code, t_out, t_metrics = detect_and_run_tests(workspace)
+            if t_code == 0 and t_metrics["failed"] == 0 and t_metrics["passed"] > 0:
+                print(f"{GREEN}{BOLD}[SUCCESS] Test reconciliation resolved all test failures! 0 failures, 100% passing.{RESET}")
+                for rf in repaired:
+                    if rf not in all_repaired:
+                        all_repaired.append(rf)
+                return True, t_out, all_repaired
+
+            if t_metrics["failed"] < current_failed:
+                print(f"  {GREEN}[+] Test reconciliation reduced failures ({current_failed} -> {t_metrics['failed']}){RESET}")
+                output = t_out
+                metrics = t_metrics
+                current_failed = metrics["failed"]
+                failure_info = parse_test_failures(workspace, output)
+
+        # Step 2: Adaptive Source / Test LLM Code Repair
+        if failure_info["source_files"] and (iteration % 2 == 1 or not failure_info["test_files"]):
+            print(f"{YELLOW}[*] Round {iteration} Strategy: Repairing application source implementation...{RESET}")
+            src_repaired = apply_dynamic_llm_repairs(workspace, failure_info, repo_url=repo_url, target_files=failure_info["source_files"])
+            for sf in src_repaired:
+                if sf not in repaired:
+                    repaired.append(sf)
+        else:
+            print(f"{YELLOW}[*] Round {iteration} Strategy: Diagnosing and repairing test files...{RESET}")
+            target_tests = failure_info["test_files"] if failure_info["test_files"] else failure_info["target_files"]
+            t_repaired = apply_dynamic_llm_repairs(workspace, failure_info, repo_url=repo_url, target_files=target_tests)
+            for tf in t_repaired:
+                if tf not in repaired:
+                    repaired.append(tf)
 
         # Regression Verification
         new_ret, new_out, new_metrics = detect_and_run_tests(workspace)
@@ -628,14 +658,22 @@ def autonomous_repair_loop(workspace: Path, repo_url: str = "", max_iterations: 
             return True, new_out, all_repaired
 
         if new_metrics["failed"] > best_failed or (new_metrics["passed"] < metrics["passed"] and new_metrics["failed"] >= best_failed):
-            print(f"{YELLOW}[!] Regression detected: failures increased ({best_failed} -> {new_metrics['failed']}). Reverting patch to last stable state.{RESET}")
+            print(f"{YELLOW}[!] Regression detected: failures increased ({best_failed} -> {new_metrics['failed']}). Reverting round changes.{RESET}")
             for target, content in backups.items():
                 (workspace / target).write_text(content, encoding="utf-8")
         else:
-            best_failed = new_metrics["failed"]
+            if new_metrics["failed"] < best_failed:
+                best_failed = new_metrics["failed"]
+                # Dynamic auto-extension: if progress is actively happening on the last round, grant up to 2 extra rounds to finish!
+                if iteration == total_allowed and total_allowed < 10:
+                    total_allowed += 2
+                    print(f"{CYAN}[*] Active progress detected (failures decreasing). Auto-extending repair loop by 2 rounds (max: {total_allowed})...{RESET}")
+
             for rf in repaired:
                 if rf not in all_repaired:
                     all_repaired.append(rf)
+
+        iteration += 1
 
     # Final test evaluation
     final_code, final_out, final_metrics = detect_and_run_tests(workspace)
