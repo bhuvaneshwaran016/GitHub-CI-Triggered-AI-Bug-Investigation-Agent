@@ -1357,12 +1357,24 @@ if __name__ == "__main__":
     default_host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
     host = os.environ.get("HOST", default_host)
     port = int(os.environ.get("PORT", 8000))
-    # Auto-reload by default on local development so changes to code are picked up immediately
-    is_cloud = bool(os.environ.get("PORT"))
-    default_reload = "false" if is_cloud else "true"
-    reload = os.environ.get("RELOAD", default_reload).lower() in ("true", "1")
+    # Keep reload disabled by default so background repair tasks and file writes in workspace are never interrupted
+    reload = os.environ.get("RELOAD", "false").lower() in ("true", "1")
+    reload_excludes = [
+        "workspace",
+        "workspace/*",
+        "workspace/**",
+        "analysis_workspace",
+        "analysis_workspace/*",
+        "analysis_workspace/**",
+        "*.json",
+        "*.log",
+        ".pytest_cache",
+        "__pycache__",
+        ".git",
+    ] if reload else None
+
     print("\n" + "=" * 65)
     print("  CI_Agent Web Application Running Successfully!")
     print(f"  Open in browser: http://localhost:{port} or http://127.0.0.1:{port}")
     print("=" * 65 + "\n")
-    uvicorn.run("server:app", host=host, port=port, reload=reload)
+    uvicorn.run("server:app", host=host, port=port, reload=reload, reload_excludes=reload_excludes)
