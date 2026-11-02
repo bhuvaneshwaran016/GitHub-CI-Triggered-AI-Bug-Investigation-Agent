@@ -966,7 +966,7 @@
       const res = await fetch("/api/project/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repo_url: repoUrl, branch, max_iterations: maxIterations }),
+        body: JSON.stringify({ repo_url: repoUrl, branch }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Analysis failed");
