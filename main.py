@@ -159,15 +159,23 @@ def detect_and_run_tests(workspace: Path, custom_command: str = None) -> tuple[i
     Auto-detects test framework and executes tests in the workspace.
     Parses test counts (passed, failed, errors) and summary line.
     """
+    pythonpath_dirs = ["."]
+    if (workspace / "src").is_dir():
+        pythonpath_dirs.append("src")
+    pythonpath_arg = f"pythonpath={' '.join(pythonpath_dirs)}"
+
     if custom_command:
         cmd = custom_command.split()
     elif (workspace / "package.json").is_file() and not any(workspace.glob("**/*.py")):
         cmd = ["npm", "test"]
     else:
-        cmd = [sys.executable, "-m", "pytest", "-v", "-o", "pythonpath=."]
+        cmd = [sys.executable, "-m", "pytest", "-v", "-o", pythonpath_arg]
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(workspace.resolve())
+    py_paths = [str(workspace.resolve())]
+    if (workspace / "src").is_dir():
+        py_paths.append(str((workspace / "src").resolve()))
+    env["PYTHONPATH"] = os.pathsep.join(py_paths)
 
     try:
         proc = subprocess.run(
@@ -487,28 +495,46 @@ def repair_defective_test_assertions(workspace: Path, output: str) -> list[str]:
 def sanitize_patched_code(original_code: str, patched_code: str) -> str:
     """
     Sanitizes LLM-generated Python code:
-    1. Fixes invalid synchronous 'with self.lock:' in async contexts with asyncio.Lock.
+    1. Fixes invalid synchronous 'with self.lock:' ONLY inside genuine async def methods.
     2. Preserves synchronous methods that the LLM mistakenly changed to async.
+    3. Removes invalid 'async with' and 'await' from synchronous def functions.
     """
     if not patched_code:
         return patched_code
 
-    # Fix asyncio.Lock usage: synchronous 'with self.lock:' -> 'async with self.lock:'
-    if "asyncio.Lock" in patched_code or "asyncio.Lock" in original_code:
-        patched_code = re.sub(r'(?<!async\s)\bwith\s+self\.lock:', 'async with self.lock:', patched_code)
-
     # Prevent accidental conversion of synchronous helper methods to async
-    orig_sync_funcs = re.findall(r'(?<!async\s)def\s+([a-zA-Z0-9_]+)\s*\(', original_code)
+    orig_sync_funcs = set(re.findall(r'(?<!async\s)def\s+([a-zA-Z0-9_]+)\s*\(', original_code))
     for fn in orig_sync_funcs:
-        if f"async def {fn}(" in patched_code and f"def {fn}(" in original_code:
+        if f"async def {fn}(" in patched_code:
             patched_code = patched_code.replace(f"async def {fn}(", f"def {fn}(")
 
-    # Prevent invalid await in synchronous functions (e.g. def func(...): return await ...)
-    if "await " in patched_code:
-        # If the original function was synchronous, strip invalid await calls
-        for fn in orig_sync_funcs:
-            pattern = rf"(def\s+{fn}\s*\([^)]*\):[\s\S]*?)(?:await\s+)"
-            patched_code = re.sub(pattern, r"\1", patched_code)
+    # Fix asyncio.Lock usage ONLY in genuine async methods:
+    async_funcs = set(re.findall(r'async\s+def\s+([a-zA-Z0-9_]+)\s*\(', patched_code))
+    for fn in async_funcs:
+        pattern = rf"(async\s+def\s+{fn}\s*\([^)]*\):[\s\S]*?)(?<!async\s)\bwith\s+self\.lock:"
+        patched_code = re.sub(pattern, r"\1async with self.lock:", patched_code)
+
+    # In ANY synchronous function, 'async with' and 'await' are illegal syntax -> sanitize
+    for fn in orig_sync_funcs:
+        pattern_lock = rf"(def\s+{fn}\s*\([^)]*\):[\s\S]*?)async\s+with\s+self\.lock:"
+        patched_code = re.sub(pattern_lock, r"\1with self.lock:", patched_code)
+
+        pattern_await = rf"(def\s+{fn}\s*\([^)]*\):[\s\S]*?)(?:await\s+)"
+        patched_code = re.sub(pattern_await, r"\1", patched_code)
+
+    # Auto-heal illegal await or async with if AST syntax error persists
+    try:
+        ast.parse(patched_code)
+    except SyntaxError as e:
+        err_str = str(e).lower()
+        if "outside async" in err_str:
+            clean = re.sub(r'\bawait\s+', '', patched_code)
+            clean = re.sub(r'\basync\s+with\s+', 'with ', clean)
+            try:
+                ast.parse(clean)
+                patched_code = clean
+            except SyntaxError:
+                pass
 
     return patched_code
 

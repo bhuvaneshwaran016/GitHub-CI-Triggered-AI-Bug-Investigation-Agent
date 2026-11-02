@@ -1346,7 +1346,10 @@ if __name__ == "__main__":
     default_host = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
     host = os.environ.get("HOST", default_host)
     port = int(os.environ.get("PORT", 8000))
-    reload = os.environ.get("RELOAD", "false").lower() in ("true", "1")
+    # Auto-reload by default on local development so changes to code are picked up immediately
+    is_cloud = bool(os.environ.get("PORT"))
+    default_reload = "false" if is_cloud else "true"
+    reload = os.environ.get("RELOAD", default_reload).lower() in ("true", "1")
     print("\n" + "=" * 65)
     print("  CI_Agent Web Application Running Successfully!")
     print(f"  Open in browser: http://localhost:{port} or http://127.0.0.1:{port}")
