@@ -1199,12 +1199,17 @@ def run_repair_pipeline_job(job_id: str, repo_url: str, branch: str, max_iterati
 
         failure_info = ci_backend.parse_test_failures(workspace, output)
         job["diagnosis"] = {
-            "failing_tests": failure_info.get("failed_tests", [])[:10],
+            "failing_tests": failure_info.get("failed_tests", []),
             "target_files": failure_info.get("target_files", []),
             "source_files": failure_info.get("source_files", []),
             "test_files": failure_info.get("test_files", []),
         }
+        failing_count = len(failure_info.get("failed_tests", []))
+        job["logs"].append(f"Fault localization complete: {failing_count} failing test(s) identified. Inspecting baseline failures before repair...")
         save_jobs_store()
+
+        # Allow user to clearly observe the failing tests in UI before automated repair executes
+        time.sleep(3.5)
 
         # Step 4: Autonomous repair loop
         job["current_step"] = 4

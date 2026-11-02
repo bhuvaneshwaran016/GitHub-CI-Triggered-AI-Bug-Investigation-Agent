@@ -1848,6 +1848,10 @@
           const failList = document.getElementById("diagnosis-failing-tests");
           failList.innerHTML = "";
           const fails = job.diagnosis.failing_tests || [];
+          const countBadge = document.getElementById("diagnosis-failing-count");
+          if (countBadge) {
+            countBadge.textContent = fails.length > 0 ? `${fails.length} failing` : `0 failing`;
+          }
           if (fails.length === 0) {
             failList.innerHTML = `<li style="color:var(--color-text-muted); font-size:0.86rem;">• 0 failing tests detected.</li>`;
           } else {
@@ -1899,7 +1903,7 @@
       } catch (err) {
         console.warn("Poll status error", err);
       }
-    }, 2000);
+    }, 1000);
   }
 
   function renderDiff(diffText) {
